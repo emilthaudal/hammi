@@ -14,10 +14,12 @@ import java.io.IOException;
 public class HammiApplication extends Application {
     @Override
     public void start(Stage stage) throws IOException {
-        runMainScene(stage);
+        GameState state = new GameState(stage);
+        runMainScene(state);
     }
 
-    public void runMainScene(Stage stage) {
+    public void runMainScene(GameState state) {
+        Stage stage = state.getStage();
         Group root = new Group();
         stage.setTitle("Hammi");
         Scene mainScene = new Scene(root);
