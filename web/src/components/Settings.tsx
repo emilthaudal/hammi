@@ -3,6 +3,7 @@ import { api, UnauthorizedError } from "../api";
 import { disablePush, enablePush, isIos, pushStatus, type PushStatus } from "../push";
 import type { Session } from "../storage";
 import type { PetView } from "../types";
+import { HowToPlay } from "./HowToPlay";
 
 type Props = {
   session: Session;
@@ -104,6 +105,8 @@ export function Settings({ session, petName, onRenamed, onLogout, onClose }: Pro
             {pushError && <p className="muted small">{pushError}</p>}
           </div>
         )}
+
+        <HowToPlay />
 
         <div className="field">
           <label>Signed in as {session.name}</label>

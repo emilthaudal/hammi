@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, UnauthorizedError } from "../api";
+import { GAMES } from "../game/games/common";
 import { Scene } from "../game/scene";
 import { treasureName, withArticle } from "../game/treasures";
 import type { Session } from "../storage";
 import { needsOf } from "../needs";
 import { timeAgo } from "../time";
-import type { ActionType, GameId, PetView, TreasureId } from "../types";
+import type { ActionType, FoodId, GameId, PetView, TreasureId } from "../types";
 import { Device, ICONS, type ButtonId } from "./Device";
 import { GearIcon } from "./Icons";
 import { LogPanel } from "./LogPanel";
@@ -46,7 +47,15 @@ export function GameScreen({ session, onLogout }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [gift, setGift] = useState<{ item: TreasureId; isNew: boolean } | null>(null);
+  const [hint, setHint] = useState<GameId | null>(null);
   const busy = useRef(false);
+
+  useEffect(() => {
+    scene.onHint = setHint;
+    return () => {
+      scene.onHint = undefined;
+    };
+  }, [scene]);
 
   const fail = useCallback(
     (e: unknown) => {
@@ -95,12 +104,12 @@ export function GameScreen({ session, onLogout }: Props) {
   }, [gift]);
 
   const act = useCallback(
-    async (type: ActionType, play?: { won: number; game: GameId }) => {
+    async (type: ActionType, extra?: { won: number; game: GameId } | { food: FoodId }) => {
       if (busy.current) return;
       busy.current = true;
       try {
-        const res = await api.action(session.token, type, play);
-        scene.applyAction(res.state, res.reaction, type);
+        const res = await api.action(session.token, type, extra);
+        scene.applyAction(res.state, res.reaction, type, extra && "food" in extra ? extra.food : undefined);
         setPet(res.state);
         setToast(null);
       } catch (e) {
@@ -142,12 +151,16 @@ export function GameScreen({ session, onLogout }: Props) {
       if (pet.asleep) return scene.react("asleep");
       return scene.openPicker((won, game) => act("play", { won, game }));
     }
+    // An egg or a sleeping Hammi can't eat; send it as before so Hammi reacts.
+    if ((id === "meal" || id === "snack") && pet && pet.stage !== "egg" && !pet.asleep)
+      return scene.openFoodPicker(id, (food) => act(id, { food }));
     act(id);
   };
 
   const press = (b: ButtonId, down: boolean) => {
     if (scene.mode === "picker" || scene.mode === "game") return scene.input(b, down);
     if (!down) return;
+    if (b === "A" && scene.mode === "stats") return scene.nextStatsPage(true);
     if (b === "A") return setSelected((s) => (s + 1) % ICONS.length);
     if (b === "B") {
       if (scene.mode === "stats") return scene.setMode("idle");
@@ -162,7 +175,7 @@ export function GameScreen({ session, onLogout }: Props) {
   const touchScreen = (fx: number, fy: number, down: boolean) => {
     if (scene.mode === "picker" || scene.mode === "game") return scene.touch(fx, fy, down);
     if (!down) return;
-    if (scene.mode === "stats") return scene.setMode("idle");
+    if (scene.mode === "stats") return scene.nextStatsPage(false) || scene.setMode("idle");
     if (scene.hitsPresent(fx, fy)) return claimGift();
     if (pet) act("pet");
   };
@@ -221,6 +234,12 @@ export function GameScreen({ session, onLogout }: Props) {
         onLcdTouch={touchScreen}
       />
       <div className="below" aria-live="polite">
+        {hint && (
+          <p className="hint">
+            <strong>{GAMES.find((g) => g.id === hint)?.title}</strong>{" "}
+            {GAMES.find((g) => g.id === hint)?.howTo}
+          </p>
+        )}
         {gift ? (
           <p className="gift-result">
             Hammi found you {withArticle(treasureName(gift.item))}!{gift.isNew && <span className="new">New!</span>}{" "}

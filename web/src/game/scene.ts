@@ -1,6 +1,7 @@
-import type { ActionType, GameId, PetView, Reaction, TreasureId } from "../types";
+import type { ActionType, FoodId, GameId, PetView, Reaction, TreasureId } from "../types";
+import { foodById, foodsOf } from "./foods";
 import { drawText, textWidth } from "./font";
-import { blit, H, W, type Frame } from "./frame";
+import { blit, H, W, type Bitmap, type Frame } from "./frame";
 import { GAMES, type MiniGame } from "./games/common";
 import { LeftRight } from "./games/leftright";
 import { SeedCatch } from "./games/catch";
@@ -19,6 +20,8 @@ export type Button = "A" | "B" | "C";
 type ActiveReaction = {
   kind: SceneReaction;
   action?: ActionType;
+  /** What Hammi is eating, for meals and snacks. */
+  food?: FoodId;
   start: number;
   dur: number;
   /** Poops on screen before the action, so a clean can sweep them away. */
@@ -41,8 +44,15 @@ const DURATION: Record<SceneReaction, number> = {
   grow: 3000,
   hatch: 3200,
   delighted: 2800,
+  favourite: 2600,
   gift: 4200,
 };
+
+/** How long a game's explanation stays up if nobody presses anything. */
+const HINT_MS = 6000;
+
+type PickerKind = "game" | "meal" | "snack";
+type PickerRow = { label: string; icon: Bitmap; favourite?: boolean };
 
 // Delight follows the action's own animation for food and cleaning.
 const EAT_MS = 1950;
@@ -71,11 +81,19 @@ export class Scene {
   /** True when the current frame should be painted with the lights-off palette. */
   dark = false;
   onModeChange?: (mode: Mode) => void;
+  /** The game whose explanation should show under the device, or null. */
+  onHint?: (game: GameId | null) => void;
 
   private reaction: ActiveReaction | null = null;
   private game: MiniGame | null = null;
+  private gameStart = 0;
+  private hint: GameId | null = null;
   private onPlayed: ((won: number, game: GameId) => void) | null = null;
+  private onFood: ((food: FoodId) => void) | null = null;
+  private pickerKind: PickerKind = "game";
   private pickerIndex = 0;
+  private gameIndex = 0;
+  private statsPage = 0;
   private x = 16;
   private dir: -1 | 1 = 1;
   private moving = false;
@@ -98,10 +116,11 @@ export class Scene {
   }
 
   /** Applies the state returned by an action and plays its reaction. */
-  applyAction(state: PetView, reaction: Reaction, action: ActionType) {
+  applyAction(state: PetView, reaction: Reaction, action: ActionType, food?: FoodId) {
     const poops = this.pet?.poops ?? 0;
     this.setPet(state);
     this.react(reaction, action, poops);
+    if (this.reaction) this.reaction.food = food ?? (action === "snack" ? "sunflower" : "seeds");
   }
 
   applyGift(state: PetView, item: TreasureId, isNew: boolean) {
@@ -113,30 +132,79 @@ export class Scene {
   react(kind: SceneReaction, action?: ActionType, poops = this.pet?.poops ?? 0) {
     let dur = DURATION[kind];
     if (kind === "delighted" && (action === "meal" || action === "snack")) dur += EAT_MS;
+    if (kind === "favourite") dur += EAT_MS;
     if (kind === "delighted" && action === "clean") dur += SWEEP_MS;
     this.reaction = { kind, action, start: performance.now(), dur, poops };
   }
 
   setMode(mode: Mode) {
     if (mode !== "game") this.game = null;
+    if (mode !== "picker" && mode !== "game") this.setHint(null);
+    if (mode === "stats") this.statsPage = 0;
     if (this.mode === mode) return;
     this.mode = mode;
     this.onModeChange?.(mode);
+  }
+
+  private setHint(hint: GameId | null) {
+    if (hint === this.hint) return;
+    this.hint = hint;
+    this.onHint?.(hint);
   }
 
   /** Opens the game picker; `onPlayed` gets the score when a game finishes. */
   openPicker(onPlayed: (won: number, game: GameId) => void) {
     this.reaction = null;
     this.onPlayed = onPlayed;
+    this.pickerKind = "game";
+    this.pickerIndex = this.gameIndex;
     this.setMode("picker");
+    this.setHint(GAMES[this.pickerIndex].id);
   }
 
-  private startGame(id: GameId) {
-    this.game = NEW_GAME[id]();
-    this.setMode("game");
+  /** Opens the meal or snack picker; `onFood` gets the chosen food. */
+  openFoodPicker(kind: "meal" | "snack", onFood: (food: FoodId) => void) {
+    this.reaction = null;
+    this.onFood = onFood;
+    this.pickerKind = kind;
+    this.pickerIndex = 0;
+    this.setMode("picker");
+    this.setHint(null);
   }
 
-  /** Buttons while the picker or a game is showing. */
+  private pickerRows(): PickerRow[] {
+    if (this.pickerKind === "game") {
+      const icons = [S.arrows, S.seed[0], S.WISH_ICONS.play];
+      return GAMES.map((g, i) => ({ label: g.label, icon: icons[i] }));
+    }
+    return foodsOf(this.pickerKind).map((f) => ({
+      label: f.label,
+      icon: f.bites[0],
+      favourite: this.pet?.favouriteFood === f.id,
+    }));
+  }
+
+  private movePicker() {
+    this.pickerIndex = (this.pickerIndex + 1) % this.pickerRows().length;
+    if (this.pickerKind === "game") this.setHint(GAMES[this.pickerIndex].id);
+  }
+
+  private pick(row: number) {
+    if (this.pickerKind === "game") {
+      this.gameIndex = row;
+      const id = GAMES[row].id;
+      this.game = NEW_GAME[id]();
+      this.gameStart = performance.now();
+      this.setMode("game");
+      this.setHint(id);
+      return;
+    }
+    const food = foodsOf(this.pickerKind)[row].id;
+    this.setMode("idle");
+    this.onFood?.(food);
+  }
+
+  /** Buttons while a picker or a game is showing. */
   input(button: Button, down: boolean) {
     const t = performance.now();
     if (button === "C") {
@@ -145,24 +213,38 @@ export class Scene {
     }
     if (this.mode === "picker") {
       if (!down) return;
-      if (button === "A") this.pickerIndex = (this.pickerIndex + 1) % GAMES.length;
-      else this.startGame(GAMES[this.pickerIndex].id);
+      if (button === "A") this.movePicker();
+      else this.pick(this.pickerIndex);
       return;
     }
+    if (down) this.setHint(null);
     this.game?.press(button === "A" ? -1 : 1, down, t);
   }
 
-  /** Touches on the screen while the picker or a game is showing. */
+  /** Touches on the screen while a picker or a game is showing. */
   touch(fx: number, fy: number, down: boolean) {
     const t = performance.now();
     if (this.mode === "picker") {
       if (!down) return;
-      const row = Math.min(GAMES.length - 1, Math.max(0, Math.floor(fy * GAMES.length)));
+      const rows = this.pickerRows().length;
+      const row = Math.min(rows - 1, Math.max(0, Math.floor(fy * rows)));
       this.pickerIndex = row;
-      this.startGame(GAMES[row].id);
+      this.pick(row);
       return;
     }
+    if (down) this.setHint(null);
     this.game?.tap(fx, down, t);
+  }
+
+  /** Turns to the next Stats page; false when there are no more pages. */
+  nextStatsPage(wrap: boolean): boolean {
+    const pages = this.pet?.favouriteFood ? 2 : 1;
+    if (this.statsPage + 1 < pages) {
+      this.statsPage++;
+      return true;
+    }
+    if (wrap) this.statsPage = 0;
+    return false;
   }
 
   /** Whether a tap at this screen position lands on today's present. */
@@ -187,6 +269,7 @@ export class Scene {
     if (this.mode === "picker") return this.drawPicker(f, t);
     if (this.mode === "game" && this.game) {
       const body = p.stage === "egg" ? S.BODIES.baby : bodyFor(p);
+      if (this.hint && t - this.gameStart > HINT_MS) this.setHint(null);
       const won = this.game.render(f, t, { pet: p, body, hat: hatFor(p) });
       if (won !== null) {
         const id = this.game.id;
@@ -232,7 +315,7 @@ export class Scene {
     const hat = hatFor(p);
     const delightedAfterEating = r?.kind === "delighted" && (r.action === "meal" || r.action === "snack");
     const delightedAfterSweep = r?.kind === "delighted" && r.action === "clean";
-    const eating = r?.kind === "yum" || (delightedAfterEating && e < EAT_MS);
+    const eating = r?.kind === "yum" || ((delightedAfterEating || r?.kind === "favourite") && e < EAT_MS);
     const sweeping = r?.kind === "clean" || (delightedAfterSweep && e < SWEEP_MS + 400);
     // The delight itself starts once eating or sweeping is done.
     const de = r?.kind === "delighted" ? e - (delightedAfterEating ? EAT_MS : delightedAfterSweep ? SWEEP_MS : 0) : -1;
@@ -304,7 +387,7 @@ export class Scene {
         const roomRight = this.x + w + 1 + foodW <= (p.poops > 0 ? 35 : 47);
         const foodX = roomRight ? this.x + w + 1 : this.x - 1 - foodW;
         flip = !roomRight;
-        const items = r.action === "snack" ? S.seed : S.meal;
+        const items = foodById(r.food ?? (r.action === "snack" ? "sunflower" : "seeds")).bites;
         if (eating) {
           const bite = Math.min(3, Math.floor(e / 650));
           expr = bite < 3 ? (Math.floor(e / 160) % 2 ? "eatOpen" : "eat") : "happy";
@@ -327,6 +410,17 @@ export class Scene {
         sparkles(f, t, this.x, top, w);
         sparkles(f, t + 100, this.x + 4, top + 6, w - 8);
         floatHearts(f, de, this.x, top, w);
+      } else if (r.kind === "favourite") {
+        // Favourite food: hearts, a happy hop and a big heart flourish on the screen.
+        const fe = e - EAT_MS;
+        expr = "love";
+        dy = HOP[Math.floor(fe / 60) % HOP.length];
+        floatHearts(f, fe, this.x, top, w);
+        const beat = Math.floor(fe / 250) % 2 === 0;
+        const big = beat ? S.heartFull : S.heartEmpty;
+        const hx = this.x + w + 9 <= W ? this.x + w + 2 : this.x - 9;
+        blit(f, big, hx, Math.max(0, top - 4));
+        if (beat) blit(f, S.sparkleSmall, hx + 6, Math.max(0, top - 7));
       } else {
         switch (r.kind) {
           case "happy":
@@ -522,6 +616,11 @@ export class Scene {
   }
 
   private drawStats(f: Frame, p: PetView) {
+    const pages = p.favouriteFood ? 2 : 1;
+    if (pages > 1)
+      for (let i = 0; i < pages; i++) f.rect(W / 2 - 3 + i * 4, H - 1, 2, 1, i === this.statsPage ? 2 : 1);
+    if (this.statsPage === 1 && p.favouriteFood) return this.drawFavourite(f, p.favouriteFood);
+
     const age = p.stage === "egg" ? "EGG" : `${Math.floor(p.ageDays)}D`;
     const ageW = textWidth(age);
     const maxChars = Math.floor((W - ageW - 3) / 4);
@@ -541,18 +640,36 @@ export class Scene {
     });
   }
 
+  /** Stats page two: Hammi's favourite food, drawn at double size. */
+  private drawFavourite(f: Frame, id: FoodId) {
+    const food = foodById(id);
+    drawText(f, "FAV", 1, 1);
+    blit(f, S.heart, 14, 1);
+    f.rect(0, 7, W, 1, 1);
+    const icon = food.bites[0];
+    const ox = Math.floor((W - icon.w * 2) / 2);
+    const oy = 9 + Math.floor((14 - icon.h * 2) / 2);
+    for (let y = 0; y < icon.h; y++)
+      for (let x = 0; x < icon.w; x++) {
+        const v = icon.data[y * icon.w + x];
+        if (v >= 0) f.rect(ox + x * 2, oy + y * 2, 2, 2, v as 0 | 1 | 2);
+      }
+    drawText(f, food.label, Math.floor((W - textWidth(food.label)) / 2), 25);
+  }
+
   private drawPicker(f: Frame, t: number) {
-    const icons = [S.arrows, S.seed[0], S.WISH_ICONS.play];
-    GAMES.forEach((g, i) => {
+    this.pickerRows().forEach((row, i) => {
       const y = 2 + i * 11;
       const selected = i === this.pickerIndex;
       if (selected) {
         f.rect(0, y - 2, W, 10, 1);
         if (Math.floor(t / 400) % 2 === 0) drawText(f, ">", 2, y);
       }
-      drawText(f, g.label, 7, y, 2);
-      const icon = icons[i];
-      blit(f, icon, W - 3 - icon.w, y + 2 - Math.floor(icon.h / 2));
+      drawText(f, row.label, 7, y, 2);
+      const icon = row.icon;
+      const ix = W - 1 - icon.w;
+      blit(f, icon, ix, y + 2 - Math.floor(icon.h / 2));
+      if (row.favourite) blit(f, S.heart, ix - 6, y);
     });
   }
 }

@@ -15,6 +15,7 @@ const CUDDLE_FUN: [f64; 3] = [5.0, 3.0, 1.0];
 const SNACK_WINDOW: Duration = Duration::hours(1);
 const SNACKS_PER_WINDOW: usize = 3;
 const SNACK_CARE_COOLDOWN: Duration = Duration::minutes(30);
+const FAVOURITE_BONUS_FUN: f64 = 8.0;
 const WISH_CHANCE_PER_MINUTE: f64 = 1.0 / 240.0;
 const WISH_LASTS: Duration = Duration::hours(2);
 const WISH_BONUS_FUN: f64 = 15.0;
@@ -151,6 +152,11 @@ pub struct Pet {
     /// Start of the current cuddle window and how many cuddles it has had.
     #[serde(default)]
     pub cuddle_window: Option<(DateTime<Utc>, u32)>,
+    /// Secret until someone feeds it and `favourite_known` flips.
+    #[serde(default)]
+    pub favourite_food: Option<Food>,
+    #[serde(default)]
+    pub favourite_known: bool,
 }
 
 /// Something that happened during a tick, for the event log and notifications.
@@ -183,6 +189,51 @@ pub struct Action {
     /// Mini-game score 0–5, only for `Play`.
     pub won: u8,
     pub game: Game,
+    /// Only for `Meal` and `Snack`; defaults to seed mix / sunflower seed.
+    pub food: Option<Food>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Food {
+    Seeds,
+    Carrot,
+    Corn,
+    Sunflower,
+    Strawberry,
+    Peanut,
+}
+
+impl Food {
+    pub const ALL: [Food; 6] = [Food::Seeds, Food::Carrot, Food::Corn, Food::Sunflower, Food::Strawberry, Food::Peanut];
+
+    pub fn is_meal(self) -> bool {
+        matches!(self, Food::Seeds | Food::Carrot | Food::Corn)
+    }
+
+    /// As in "fed Hammi a carrot" / "gave Hammi a strawberry".
+    fn serving(self) -> &'static str {
+        match self {
+            Food::Seeds => "a bowl of seed mix",
+            Food::Carrot => "a carrot",
+            Food::Corn => "some corn",
+            Food::Sunflower => "a sunflower seed",
+            Food::Strawberry => "a strawberry",
+            Food::Peanut => "a peanut",
+        }
+    }
+
+    /// As in "Hammi's favourite food is strawberries".
+    fn plural(self) -> &'static str {
+        match self {
+            Food::Seeds => "seed mix",
+            Food::Carrot => "carrots",
+            Food::Corn => "corn",
+            Food::Sunflower => "sunflower seeds",
+            Food::Strawberry => "strawberries",
+            Food::Peanut => "peanuts",
+        }
+    }
 }
 
 pub fn birthday_text(name: &str, weeks: u32) -> String {
@@ -210,11 +261,17 @@ pub struct Outcome {
     pub reaction: &'static str,
     /// Log line describing what the player did, without the player's name ("fed Hammi a meal").
     pub log: Option<String>,
+    /// A second diary line for a discovery, e.g. finding out the favourite food.
+    pub discovery: Option<String>,
 }
 
 impl Outcome {
     fn quiet(reaction: &'static str) -> Self {
-        Outcome { reaction, log: None }
+        Outcome { reaction, log: None, discovery: None }
+    }
+
+    fn logged(reaction: &'static str, log: String) -> Self {
+        Outcome { reaction, log: Some(log), discovery: None }
     }
 }
 
@@ -256,6 +313,8 @@ impl Pet {
             recent_snacks: Vec::new(),
             last_counted_snack: None,
             cuddle_window: None,
+            favourite_food: None,
+            favourite_known: false,
         }
     }
 
@@ -423,19 +482,35 @@ impl Pet {
     /// Apply a player action. `poop_delay_minutes` is only used by meals.
     pub fn act(&mut self, action: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
         let mut outcome = self.act_inner(action, poop_delay_minutes, now);
+        let ate = matches!(action.kind, ActionKind::Meal | ActionKind::Snack) && outcome.log.is_some();
+        if ate && action.food.is_some() && self.favourite_food == action.food {
+            self.fun = (self.fun + FAVOURITE_BONUS_FUN).min(100.0);
+            outcome.reaction = "favourite";
+            if !self.favourite_known {
+                self.favourite_known = true;
+                let food = self.favourite_food.unwrap().plural();
+                outcome.discovery = Some(format!("found out {}'s favourite food is {food}!", self.name));
+            }
+        }
         let granted = outcome.log.is_some() || outcome.reaction == "love";
         if granted && self.wish.is_some_and(|w| w.kind == action.kind) {
             self.wish = None;
             self.fun = (self.fun + WISH_BONUS_FUN).min(100.0);
-            outcome = Outcome {
-                reaction: "delighted",
-                log: Some(format!("granted {}'s wish for {}", self.name, action.kind.wish_noun())),
-            };
+            outcome.reaction = "delighted";
+            outcome.log = Some(format!("granted {}'s wish for {}", self.name, action.kind.wish_noun()));
         }
         outcome
     }
 
-    fn act_inner(&mut self, Action { kind, won, game }: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
+    /// Pick the secret favourite food if it hasn't been picked yet. `roll` is uniform in [0, 1).
+    pub fn ensure_favourite(&mut self, roll: f64) {
+        if self.favourite_food.is_none() {
+            let i = ((roll * Food::ALL.len() as f64) as usize).min(Food::ALL.len() - 1);
+            self.favourite_food = Some(Food::ALL[i]);
+        }
+    }
+
+    fn act_inner(&mut self, Action { kind, won, game, food }: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
         let name = self.name.clone();
         if self.stage == Stage::Egg {
             return Outcome::quiet(if kind == ActionKind::Pet { "love" } else { "egg" });
@@ -453,7 +528,8 @@ impl Pet {
                 self.fullness += 35.0;
                 self.poops_due.push(now + Duration::minutes(poop_delay_minutes));
                 self.care.meals += 1;
-                Outcome { reaction: "yum", log: Some(format!("fed {name} a meal")) }
+                let food = food.unwrap_or(Food::Seeds).serving();
+                Outcome::logged("yum", format!("fed {name} {food}"))
             }
             ActionKind::Snack => {
                 self.recent_snacks.retain(|t| now - *t < SNACK_WINDOW);
@@ -467,14 +543,15 @@ impl Pet {
                     self.last_counted_snack = Some(now);
                     self.care.snacks += 1;
                 }
-                Outcome { reaction: "yum", log: Some(format!("gave {name} a sunflower seed")) }
+                let food = food.unwrap_or(Food::Sunflower).serving();
+                Outcome::logged("yum", format!("gave {name} {food}"))
             }
             ActionKind::Play => {
                 let won = won.min(5);
                 self.fun += 10.0 + 6.0 * won as f64;
                 self.energy -= 8.0;
                 self.care.plays += 1;
-                Outcome { reaction: "happy", log: Some(format!("played {} with {name} and won {won}/5", game.title())) }
+                Outcome::logged("happy", format!("played {} with {name} and won {won}/5", game.title()))
             }
             ActionKind::Clean => {
                 if self.poops == 0 {
@@ -482,7 +559,7 @@ impl Pet {
                 }
                 self.poops = 0;
                 self.care.cleans += 1;
-                Outcome { reaction: "clean", log: Some(format!("tidied {name}'s cage")) }
+                Outcome::logged("clean", format!("tidied {name}'s cage"))
             }
             ActionKind::Pet => {
                 if self.asleep {
@@ -499,7 +576,7 @@ impl Pet {
                 if counts {
                     self.last_counted_pet = Some(now);
                     self.care.pets += 1;
-                    Outcome { reaction: "love", log: Some(format!("cuddled {name}")) }
+                    Outcome::logged("love", format!("cuddled {name}"))
                 } else {
                     Outcome::quiet("love")
                 }
@@ -544,8 +621,31 @@ mod tests {
         }
 
         fn a(&mut self, kind: ActionKind, won: u8, poop_delay: i64, now: DateTime<Utc>) -> Outcome {
-            self.act(Action { kind, won, game: Game::Leftright }, poop_delay, now)
+            self.act(Action { kind, won, game: Game::Leftright, food: None }, poop_delay, now)
         }
+    }
+
+    #[test]
+    fn favourite_food_is_discovered_once_and_gives_extra_fun() {
+        let mut p = hatched(noon());
+        p.ensure_favourite(0.7); // index 4: strawberry
+        p.ensure_favourite(0.0);
+        assert_eq!(p.favourite_food, Some(Food::Strawberry), "picked once, then kept");
+
+        let snack = |food| Action { kind: ActionKind::Snack, won: 0, game: Game::Leftright, food: Some(food) };
+        let o = p.act(snack(Food::Peanut), 0, noon());
+        assert_eq!((o.reaction, o.log.as_deref()), ("yum", Some("gave Hammi a peanut")));
+
+        p.fun = 50.0;
+        let o = p.act(snack(Food::Strawberry), 0, noon());
+        assert_eq!(o.reaction, "favourite");
+        assert_eq!(o.discovery.as_deref(), Some("found out Hammi's favourite food is strawberries!"));
+        assert!((p.fun - 70.0).abs() < 0.01, "12 + 8 favourite bonus, fun {}", p.fun);
+        assert!(p.favourite_known);
+
+        let o = p.act(snack(Food::Strawberry), 0, noon());
+        assert_eq!(o.reaction, "favourite");
+        assert!(o.discovery.is_none(), "only discovered once");
     }
 
     #[test]
