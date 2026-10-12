@@ -30,6 +30,14 @@ pub struct PushSub {
     pub auth: String,
 }
 
+/// How many times `existing` already repeats `text`: 1 for an exact match, N for "<text> (×N)".
+fn repeat_count(existing: &str, text: &str) -> Option<u32> {
+    if existing == text {
+        return Some(1);
+    }
+    existing.strip_prefix(text)?.strip_prefix(" (×")?.strip_suffix(')')?.parse().ok()
+}
+
 impl Db {
     pub fn open(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -114,6 +122,27 @@ impl Db {
             [],
         )?;
         Ok(())
+    }
+
+    /// Like `add_event`, but if the newest entry is the same text by the same person within `window`,
+    /// bump it to "<text> (×N)" instead of adding a line.
+    pub fn add_or_merge_event(&self, at: DateTime<Utc>, who: &str, text: &str, window: chrono::Duration) -> Result<()> {
+        let last: Option<(i64, DateTime<Utc>, String, String)> = self
+            .0
+            .query_row("SELECT id, at, who, text FROM events ORDER BY id DESC LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .optional()?;
+        if let Some((id, last_at, last_who, last_text)) = last
+            && last_who == who
+            && at - last_at < window
+            && let Some(count) = repeat_count(&last_text, text)
+        {
+            let merged = format!("{text} (×{})", count + 1);
+            self.0.execute("UPDATE events SET at = ?1, text = ?2 WHERE id = ?3", params![at, merged, id])?;
+            return Ok(());
+        }
+        self.add_event(at, who, text)
     }
 
     pub fn recent_events(&self, limit: u32) -> Result<Vec<Event>> {

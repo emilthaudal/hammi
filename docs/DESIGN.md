@@ -63,6 +63,11 @@ All actions are `POST /api/action` with `{ "type": ..., ... }`. Each returns the
 
 Actions on an `egg` return reaction `egg` and change nothing, except `pet` (`love`).
 
+**No spamming, no timers.** Nothing is ever disabled; Hammi just reacts like a hamster that's had enough:
+- `snack`: at most 3 per rolling hour; the 4th returns `full` and changes nothing. Snacks count towards the adult form at most once per 30 minutes.
+- `pet`: fun +5, +3, +1, then +0 for further cuddles within a 10-minute window. Always reacts `love`.
+- Diary: a repeat of the same line by the same player within 30 minutes updates the previous line to "… (×N)" instead of adding a new one.
+
 `play` also takes `"game": "leftright" | "catch" | "jump"` (default `leftright`), used only for the diary line ("Emil played Seed Catch with Hammi and won 4/5").
 
 ## Mini-games
