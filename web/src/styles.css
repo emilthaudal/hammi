@@ -269,6 +269,27 @@ h2 {
   opacity: 0.32;
 }
 
+.icon {
+  position: relative;
+}
+
+/* A need dot: a small solid pink badge in the icon's corner. */
+.need-dot {
+  position: absolute;
+  top: 3px;
+  right: calc(50% - 19px);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bezel);
+}
+
+.icon.selected .need-dot {
+  background: var(--accent-ink);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .icon.wished:not(.selected) {
   background: #ffe9ec;
   color: var(--accent);

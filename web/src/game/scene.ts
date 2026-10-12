@@ -8,6 +8,7 @@ import { WheelRun } from "./games/jump";
 import { bodyFor, bodySize, drawHammi, floatHearts, GROUND, hatFor, HOP, sparkles, type Expr } from "./hammi";
 import * as S from "./sprites";
 import { TREASURE_BITMAPS } from "./treasures";
+import { needsOf, type Needs } from "../needs";
 
 export { bodyFor } from "./hammi";
 
@@ -361,8 +362,13 @@ export class Scene {
       }
     }
 
+    // Gentle in-character hints: a tired Hammi's eyes droop now and then.
+    const needs = needsOf(p);
+    if (!r && needs.tired && expr !== "happy" && expr !== "blink" && t % 5200 < 1800) expr = "drowsy";
+
     // A wish shows as a thought bubble; otherwise a sad Hammi has a little raincloud.
-    if (p.wish && !r && !p.lightsOff) this.drawWish(f, t, p.wish, top, w);
+    let bubble: [number, number] | null = null;
+    if (p.wish && !r && !p.lightsOff) bubble = this.drawWish(f, t, p.wish, top, w);
     else if (p.mood === "sad" && !r && !p.lightsOff) {
       const cx = this.x + Math.floor(w / 2) - 4;
       blit(f, S.cloud, cx, top - 8);
@@ -370,9 +376,36 @@ export class Scene {
     }
 
     drawHammi(f, body, this.x, top + dy, { frame, expr, look, flip, hat });
+
+    if (!r && !p.lightsOff) {
+      // A hungry tummy rumbles beside the belly every few seconds.
+      if (needs.hungry && t % 6000 < 900) {
+        const right = p.poops > 0 ? 35 : W;
+        const rx = this.x + w + 5 <= right ? this.x + w + 1 : this.x - 5;
+        blit(f, S.rumble[Math.floor(t / 150) % 2], rx, top + Math.floor(h * 0.6));
+      }
+      this.drawNeedBadges(f, t, needs, bubble);
+    }
   }
 
-  private drawWish(f: Frame, t: number, wish: NonNullable<PetView["wish"]>, top: number, w: number) {
+  /** Small blinking badges in a top corner, on the side away from the wish bubble. */
+  private drawNeedBadges(f: Frame, t: number, needs: Needs, bubble: [number, number] | null) {
+    if (t % 2500 >= 2000) return;
+    const badges = (["hungry", "bored", "tired"] as const).filter((k) => needs[k]).map((k) => S.NEED_BADGES[k]);
+    if (!badges.length) return;
+    const width = badges.reduce((sum, b) => sum + b.w + 1, -1);
+    // The bubble sits in the top rows, so move to the left corner if it covers the right one.
+    const rightX = W - width;
+    const blocked = bubble !== null && bubble[0] + bubble[1] + 2 > rightX;
+    let x = blocked ? 0 : rightX;
+    for (const b of badges) {
+      blit(f, b, x, 0);
+      x += b.w + 1;
+    }
+  }
+
+  /** Draws the thought bubble and returns its left edge and width. */
+  private drawWish(f: Frame, t: number, wish: NonNullable<PetView["wish"]>, top: number, w: number): [number, number] {
     const bw = S.bubble.w;
     const onRight = this.x + w + bw - 4 <= W;
     const bx = onRight ? this.x + w - 4 : this.x - bw + 4;
@@ -384,6 +417,7 @@ export class Scene {
     const dx = onRight ? 1 : bw - 3;
     f.rect(bx + dx, by + S.bubble.h + 1, 2, 2, 2);
     f.set(bx + dx + (onRight ? -1 : 2), by + S.bubble.h + 4, 2);
+    return [bx, bw];
   }
 
   private drawUnwrap(f: Frame, t: number, r: ActiveReaction, e: number) {

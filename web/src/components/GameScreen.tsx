@@ -3,6 +3,7 @@ import { api, ApiError, UnauthorizedError } from "../api";
 import { Scene } from "../game/scene";
 import { treasureName, withArticle } from "../game/treasures";
 import type { Session } from "../storage";
+import { needsOf } from "../needs";
 import { timeAgo } from "../time";
 import type { ActionType, GameId, PetView, TreasureId } from "../types";
 import { Device, ICONS, type ButtonId } from "./Device";
@@ -190,6 +191,14 @@ export function GameScreen({ session, onLogout }: Props) {
 
   const latest = pet?.events[0];
   const wished = pet?.wish && !pet.asleep ? ICONS.findIndex((i) => i.id === pet.wish) : -1;
+  const needs = needsOf(pet);
+  const needDots = ICONS.map(({ id }) => {
+    if (id === "meal" && needs.hungry) return "Hammi is hungry";
+    if (id === "play" && needs.bored) return "Hammi is bored";
+    // Cleaning works while Hammi sleeps, so this dot stays.
+    if (id === "clean" && pet && pet.stage !== "egg" && pet.poops > 0) return "the cage needs a tidy";
+    return null;
+  });
 
   return (
     <main className="game">
@@ -206,6 +215,7 @@ export function GameScreen({ session, onLogout }: Props) {
         selected={selected}
         disabled={disabledFor(pet)}
         wished={wished}
+        needs={needDots}
         onIcon={activate}
         onButton={press}
         onLcdTouch={touchScreen}

@@ -21,25 +21,29 @@ type Props = {
   disabled: boolean[];
   /** Index of the icon Hammi is wishing for, gently highlighted. */
   wished: number;
+  /** Short reasons per icon index for a need dot, e.g. "Hammi is hungry". */
+  needs: (string | null)[];
   onIcon: (index: number) => void;
   /** Hardware buttons report presses and releases, so games can hold a direction. */
   onButton: (id: ButtonId, down: boolean) => void;
   onLcdTouch: (fx: number, fy: number, down: boolean) => void;
 };
 
-export function Device({ scene, selected, disabled, wished, onIcon, onButton, onLcdTouch }: Props) {
+export function Device({ scene, selected, disabled, wished, needs, onIcon, onButton, onLcdTouch }: Props) {
   const iconButton = (i: number) => {
     const icon = ICONS[i];
     const classes = ["icon", selected === i && "selected", disabled[i] && "disabled", wished === i && "wished"];
+    const notes = [wished === i && "Hammi is wishing for this", needs[i]].filter(Boolean);
     return (
       <button
         key={icon.id}
         type="button"
         className={classes.filter(Boolean).join(" ")}
-        aria-label={wished === i ? `${icon.label} (Hammi is wishing for this)` : icon.label}
+        aria-label={notes.length ? `${icon.label} (${notes.join(", ")})` : icon.label}
         aria-pressed={selected === i}
         onClick={() => onIcon(i)}
       >
+        {needs[i] && <span className="need-dot" aria-hidden="true" />}
         <PixelIcon id={icon.id} />
         <span>{icon.label}</span>
       </button>

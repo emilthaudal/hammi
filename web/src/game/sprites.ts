@@ -360,6 +360,18 @@ export const WISH_ICONS: Record<"meal" | "snack" | "play" | "clean" | "pet", Bit
   pet: bitmap([".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."]),
 };
 
+// --- Need cues.
+
+/** Tiny badges for the top corner of the screen. */
+export const NEED_BADGES = {
+  hungry: bitmap(["..#.#", ".#.#.", "#####", "#+++#", ".###."]),
+  bored: bitmap([".###.", "#.#.#", "#####", "#.#.#", ".###."]),
+  tired: bitmap(["......", "#####.", "#+..##", "#+..##", "#####."]),
+};
+
+/** A tummy rumble beside Hammi's belly, two frames. */
+export const rumble = [bitmap(["#.#.", ".#.#"]), bitmap([".#.#", "#.#."])];
+
 // --- Mini-games.
 
 export const pebble = bitmap([".###.", "#o++#", "#####"]);
