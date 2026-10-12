@@ -118,6 +118,9 @@ pub struct Care {
 pub struct Pet {
     pub name: String,
     pub created_at: DateTime<Utc>,
+    /// When someone first logged in and found the egg. The egg only starts hatching then.
+    #[serde(default)]
+    pub egg_found_at: Option<DateTime<Utc>>,
     pub hatched_at: Option<DateTime<Utc>>,
     pub stage: Stage,
     pub form: Option<Form>,
@@ -232,6 +235,7 @@ impl Pet {
         Pet {
             name: "Hammi".into(),
             created_at: now,
+            egg_found_at: None,
             hatched_at: None,
             stage: Stage::Egg,
             form: None,
@@ -253,6 +257,20 @@ impl Pet {
             last_counted_snack: None,
             cuddle_window: None,
         }
+    }
+
+    /// When the egg hatches, once someone has found it.
+    pub fn hatches_at(&self) -> Option<DateTime<Utc>> {
+        (self.stage == Stage::Egg).then_some(self.egg_found_at? + HATCH_AFTER)
+    }
+
+    /// Start the hatching countdown on the first login. Returns true if this login found the egg.
+    pub fn find_egg(&mut self, now: DateTime<Utc>) -> bool {
+        let found = self.stage == Stage::Egg && self.egg_found_at.is_none();
+        if found {
+            self.egg_found_at = Some(now);
+        }
+        found
     }
 
     /// What Hammi is celebrating today, if anything: (kind, text) with kind "special" or "birthday".
@@ -299,7 +317,7 @@ impl Pet {
         }
 
         if self.stage == Stage::Egg {
-            if at >= self.created_at + HATCH_AFTER {
+            if self.hatches_at().is_some_and(|h| at >= h) {
                 self.stage = Stage::Baby;
                 self.hatched_at = Some(at);
                 out.push(Happening::Hatched);
@@ -514,6 +532,7 @@ mod tests {
 
     fn hatched(now: DateTime<Utc>) -> Pet {
         let mut p = Pet::new(now - Duration::minutes(6));
+        p.find_egg(now - Duration::minutes(6));
         p.t(now);
         p
     }
@@ -590,12 +609,19 @@ mod tests {
     }
 
     #[test]
-    fn egg_hatches_after_five_minutes() {
+    fn egg_waits_to_be_found_then_hatches_after_five_minutes() {
         let mut p = Pet::new(noon());
-        assert!(p.t(noon() + Duration::minutes(4)).is_empty());
+        assert!(p.t(noon() + Duration::hours(3)).is_empty(), "nobody has logged in yet");
+        assert_eq!(p.hatches_at(), None);
+
+        let found = noon() + Duration::hours(3);
+        assert!(p.find_egg(found));
+        assert!(!p.find_egg(found + Duration::minutes(1)), "only the first login finds it");
+        assert!(p.t(found + Duration::minutes(4)).is_empty());
         assert_eq!(p.stage, Stage::Egg);
-        assert_eq!(p.t(noon() + Duration::minutes(5)), vec![Happening::Hatched]);
+        assert_eq!(p.t(found + Duration::minutes(5)), vec![Happening::Hatched]);
         assert_eq!(p.stage, Stage::Baby);
+        assert_eq!(p.hatches_at(), None);
     }
 
     #[test]
