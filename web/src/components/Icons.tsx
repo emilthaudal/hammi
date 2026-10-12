@@ -103,6 +103,26 @@ export function PixelIcon({ id }: { id: IconId }) {
   );
 }
 
+const SHADES: Record<string, string> = { "#": "px-dark", "+": "px-mid", o: "px-light" };
+
+/** Renders sprite rows (`.` `o` `+` `#`) as crisp SVG, coloured by CSS. */
+export function PixelArt({ rows, className }: { rows: string[]; className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox={`0 0 ${rows[0].length} ${rows.length}`}
+      aria-hidden="true"
+      shapeRendering="crispEdges"
+    >
+      {rows.flatMap((row, y) =>
+        [...row].map((c, x) =>
+          SHADES[c] ? <rect key={`${x}-${y}`} className={SHADES[c]} x={x} y={y} width={1} height={1} /> : null,
+        ),
+      )}
+    </svg>
+  );
+}
+
 export function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

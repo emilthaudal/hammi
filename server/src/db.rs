@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
@@ -13,6 +13,15 @@ pub struct Event {
     pub at: DateTime<Utc>,
     pub who: String,
     pub text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Treasure {
+    pub item: String,
+    pub count: u32,
+    pub first_found_by: String,
+    pub first_found_at: DateTime<Utc>,
 }
 
 pub struct PushSub {
@@ -41,6 +50,18 @@ impl Db {
                  p256dh TEXT NOT NULL,
                  auth TEXT NOT NULL,
                  created_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS gifts (
+                 player TEXT NOT NULL,
+                 day TEXT NOT NULL,
+                 item TEXT NOT NULL,
+                 PRIMARY KEY (player, day)
+             );
+             CREATE TABLE IF NOT EXISTS treasures (
+                 item TEXT PRIMARY KEY,
+                 count INTEGER NOT NULL,
+                 first_found_by TEXT NOT NULL,
+                 first_found_at TEXT NOT NULL
              );
              CREATE TABLE IF NOT EXISTS events (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,6 +119,45 @@ impl Db {
     pub fn recent_events(&self, limit: u32) -> Result<Vec<Event>> {
         let mut stmt = self.0.prepare("SELECT at, who, text FROM events ORDER BY id DESC LIMIT ?1")?;
         let rows = stmt.query_map([limit], |r| Ok(Event { at: r.get(0)?, who: r.get(1)?, text: r.get(2)? }))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn gift_claimed(&self, player: &str, day: NaiveDate) -> Result<bool> {
+        Ok(self
+            .0
+            .query_row("SELECT 1 FROM gifts WHERE player = ?1 AND day = ?2", params![player, day], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// Record a claimed gift. Returns false (and changes nothing) if this player already claimed today,
+    /// otherwise whether the item is new to the treasure box.
+    pub fn claim_gift(&mut self, player: &str, day: NaiveDate, item: &str, at: DateTime<Utc>) -> Result<Option<bool>> {
+        let tx = self.0.transaction()?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO gifts (player, day, item) VALUES (?1, ?2, ?3)",
+            params![player, day, item],
+        )?;
+        if inserted == 0 {
+            return Ok(None);
+        }
+        let is_new = tx.execute(
+            "INSERT OR IGNORE INTO treasures (item, count, first_found_by, first_found_at) VALUES (?1, 1, ?2, ?3)",
+            params![item, player, at],
+        )? == 1;
+        if !is_new {
+            tx.execute("UPDATE treasures SET count = count + 1 WHERE item = ?1", [item])?;
+        }
+        tx.commit()?;
+        Ok(Some(is_new))
+    }
+
+    pub fn treasures(&self) -> Result<Vec<Treasure>> {
+        let mut stmt =
+            self.0.prepare("SELECT item, count, first_found_by, first_found_at FROM treasures ORDER BY first_found_at")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Treasure { item: r.get(0)?, count: r.get(1)?, first_found_by: r.get(2)?, first_found_at: r.get(3)? })
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

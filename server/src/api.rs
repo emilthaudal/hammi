@@ -8,9 +8,9 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::db::{Event, PushSub};
-use crate::game::{ActionKind, Form, Mood, Stage};
-use crate::{Shared, World};
+use crate::db::{Event, PushSub, Treasure};
+use crate::game::{Action, ActionKind, Form, Game, Mood, Stage};
+use crate::{gifts, Config, Shared, World};
 
 pub fn router(state: Shared) -> Router {
     Router::new()
@@ -19,6 +19,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/state", get(get_state))
         .route("/api/action", post(action))
         .route("/api/rename", post(rename))
+        .route("/api/gift", post(gift))
+        .route("/api/treasures", get(treasures))
         .route("/api/push/key", get(push_key))
         .route("/api/push/subscribe", post(subscribe))
         .route("/api/push/unsubscribe", post(unsubscribe))
@@ -82,11 +84,24 @@ pub struct PetView {
     mood: Mood,
     server_time: DateTime<Utc>,
     events: Vec<Event>,
+    wish: Option<ActionKind>,
+    celebration: Option<Celebration>,
+    gift_available: bool,
 }
 
-fn view(w: &World, now: DateTime<Utc>) -> ApiResult<PetView> {
+#[derive(Serialize)]
+struct Celebration {
+    kind: &'static str,
+    text: String,
+}
+
+fn view(w: &World, now: DateTime<Utc>, config: &Config, who: &str) -> ApiResult<PetView> {
     let p = &w.pet;
+    let today = now.with_timezone(&config.tz).date_naive();
     Ok(PetView {
+        wish: p.wish.map(|w| w.kind),
+        celebration: p.celebration(now, config.tz, &config.special_days).map(|(kind, text)| Celebration { kind, text }),
+        gift_available: p.stage != Stage::Egg && !w.db.gift_claimed(who, today)?,
         name: p.name.clone(),
         stage: p.stage,
         form: p.form,
@@ -134,11 +149,11 @@ async fn login(State(s): State<Shared>, Json(req): Json<LoginReq>) -> ApiResult<
     Ok(Json(LoginRes { token, name }))
 }
 
-async fn get_state(State(s): State<Shared>, _: Player) -> ApiResult<Json<PetView>> {
+async fn get_state(State(s): State<Shared>, Player(who): Player) -> ApiResult<Json<PetView>> {
     let mut w = s.world.lock().unwrap();
     let now = s.clock.now();
-    w.advance(now, s.config.tz)?;
-    Ok(Json(view(&w, now)?))
+    w.advance(now, &s.config)?;
+    Ok(Json(view(&w, now, &s.config, &who)?))
 }
 
 #[derive(Deserialize)]
@@ -147,6 +162,8 @@ struct ActionReq {
     kind: ActionKind,
     #[serde(default)]
     won: u8,
+    #[serde(default)]
+    game: Game,
 }
 
 #[derive(Serialize)]
@@ -158,13 +175,49 @@ struct ActionRes {
 async fn action(State(s): State<Shared>, Player(who): Player, Json(req): Json<ActionReq>) -> ApiResult<Json<ActionRes>> {
     let mut w = s.world.lock().unwrap();
     let now = s.clock.now();
-    w.advance(now, s.config.tz)?;
-    let outcome = w.pet.act(req.kind, req.won, rand::random_range(60..=120), now);
+    w.advance(now, &s.config)?;
+    let action = Action { kind: req.kind, won: req.won, game: req.game };
+    let outcome = w.pet.act(action, rand::random_range(60..=120), now);
     if let Some(log) = &outcome.log {
         w.db.add_event(now, &who, &format!("{who} {log}"))?;
     }
     w.db.save_world(&w.pet, &w.notify)?;
-    Ok(Json(ActionRes { state: view(&w, now)?, reaction: outcome.reaction }))
+    Ok(Json(ActionRes { state: view(&w, now, &s.config, &who)?, reaction: outcome.reaction }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GiftRes {
+    item: &'static str,
+    is_new: bool,
+    state: PetView,
+}
+
+async fn gift(State(s): State<Shared>, Player(who): Player) -> ApiResult<Json<GiftRes>> {
+    let mut w = s.world.lock().unwrap();
+    let now = s.clock.now();
+    w.advance(now, &s.config)?;
+    if w.pet.stage == Stage::Egg {
+        return Err(ApiError(StatusCode::CONFLICT, "Hammi hasn't hatched yet".into()));
+    }
+    let today = now.with_timezone(&s.config.tz).date_naive();
+    let found: Vec<String> = w.db.treasures()?.into_iter().map(|t| t.item).collect();
+    let item = gifts::pick(&found, &mut || rand::random::<f64>());
+    let Some(is_new) = w.db.claim_gift(&who, today, item, now)? else {
+        return Err(ApiError(StatusCode::CONFLICT, "already opened today's gift".into()));
+    };
+    let name = w.pet.name.clone();
+    w.db.add_event(now, &who, &format!("{name} found {} for {who}", gifts::pretty_name(item)))?;
+    Ok(Json(GiftRes { item, is_new, state: view(&w, now, &s.config, &who)? }))
+}
+
+#[derive(Serialize)]
+struct TreasuresRes {
+    items: Vec<Treasure>,
+}
+
+async fn treasures(State(s): State<Shared>, _: Player) -> ApiResult<Json<TreasuresRes>> {
+    Ok(Json(TreasuresRes { items: s.world.lock().unwrap().db.treasures()? }))
 }
 
 #[derive(Deserialize)]
@@ -176,11 +229,11 @@ async fn rename(State(s): State<Shared>, Player(who): Player, Json(req): Json<Re
     let name = clean_name(&req.name, 16)?;
     let mut w = s.world.lock().unwrap();
     let now = s.clock.now();
-    w.advance(now, s.config.tz)?;
+    w.advance(now, &s.config)?;
     let old = std::mem::replace(&mut w.pet.name, name.clone());
     w.db.add_event(now, &who, &format!("{who} renamed {old} to {name}"))?;
     w.db.save_world(&w.pet, &w.notify)?;
-    Ok(Json(view(&w, now)?))
+    Ok(Json(view(&w, now, &s.config, &who)?))
 }
 
 #[derive(Serialize)]

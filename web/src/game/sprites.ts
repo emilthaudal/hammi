@@ -291,6 +291,80 @@ export const seed = [
   bitmap(["...", "...", "...", "...", "#o#", ".#."]),
 ];
 
+export const heartOutline = bitmap([".#.#.", "#o#o#", ".#o#.", "..#.."]);
+
+// --- Hats. Each sits with its bottom row on the hamster's head; `x` is the column over the face centre.
+
+export type HatKind = "party" | "pumpkin" | "santa" | "heart";
+export const HATS: Record<HatKind, { bmp: Bitmap; x: number; lift?: number }> = {
+  party: {
+    bmp: bitmap([".#.#.", "..#..", "..#..", ".###.", ".#o#.", "#####", "#o#o#", "#####"]),
+    x: 2,
+  },
+  pumpkin: {
+    bmp: bitmap(["....#..", "...##..", ".#####.", "#+#+#+#", "#+#+#+#", "#+#+#+#", ".#####."]),
+    x: 3,
+    lift: 2,
+  },
+  santa: {
+    bmp: bitmap([
+      "........##.",
+      "......##oo#",
+      "....##++##.",
+      "...#+++#...",
+      "..#+++++#..",
+      ".#ooooooo#.",
+      ".#########.",
+    ]),
+    x: 5,
+  },
+  heart: { bmp: bitmap([".##.##.", "#o#####", "#######", ".#####.", "..###..", "...#...", "...#..."]), x: 3 },
+};
+
+// --- Surprises.
+
+const cakeRows = (flame: string) => [
+  flame,
+  "...#+#...",
+  "....#....",
+  "....#....",
+  ".#######.",
+  "#o#o#o#o#",
+  "#+++++++#",
+  "#+o+o+o+#",
+  "#########",
+];
+export const cake = [bitmap(cakeRows("....#....")), bitmap(cakeRows("...#....."))];
+
+export const presentLid = bitmap([".##...##.", "#oo#.#oo#", ".##o#o##.", "#########", "#ooo#ooo#", "#########"]);
+export const presentBox = bitmap(["#+++#+++#", "#+++#+++#", "#+++#+++#", "#########"]);
+
+export const bubble = bitmap([
+  ".###########.",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  "#ooooooooooo#",
+  ".###########.",
+]);
+
+/** Icons that fit inside the thought bubble (at most 11×7). */
+export const WISH_ICONS: Record<"meal" | "snack" | "play" | "clean" | "pet", Bitmap> = {
+  meal: bitmap(["...#.#...", "..#.#....", "..+o+o+..", ".+o+o+o+.", "#########", ".#+++++#.", "..#####.."]),
+  snack: bitmap([".#.", "#+#", "#o#", "#+#", "#o#", "#+#", ".#."]),
+  play: bitmap(["..###..", ".#.#.#.", "#..#..#", "#######", "#..#..#", ".#.#.#.", "..###.."]),
+  clean: bitmap(["......#", ".....#.", "....#..", "..###..", ".####..", "#####..", "#.#.#.."]),
+  pet: bitmap([".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."]),
+};
+
+// --- Mini-games.
+
+export const pebble = bitmap([".###.", "#o++#", "#####"]);
+export const arrows = bitmap(["..#...#..", ".#.....#.", "#.......#", ".#.....#.", "..#...#.."]);
+
 /** A plain copy of a body frame to draw a face into. */
 export function bodyFrame(body: Body, i: number): Bitmap {
   return clone(body.frames[i % body.frames.length]);

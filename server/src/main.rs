@@ -1,6 +1,7 @@
 mod api;
 mod db;
 mod game;
+mod gifts;
 mod notify;
 mod push;
 
@@ -14,13 +15,14 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 use db::Db;
-use game::{Happening, Pet};
+use game::{Ctx, Happening, Pet, SpecialDay};
 use notify::{Note, NotifyState};
 use push::{Delivery, Pusher};
 
 pub struct Config {
     pub passcode: String,
     pub tz: Tz,
+    pub special_days: Vec<SpecialDay>,
 }
 
 /// Wall clock, optionally sped up for local testing with HAMMI_SPEED.
@@ -45,8 +47,9 @@ pub struct World {
 
 impl World {
     /// Bring the pet up to `now`, log what happened and persist.
-    pub fn advance(&mut self, now: DateTime<Utc>, tz: Tz) -> Result<()> {
-        let happenings = self.pet.tick(now, tz);
+    pub fn advance(&mut self, now: DateTime<Utc>, config: &Config) -> Result<()> {
+        let mut ctx = Ctx { tz: config.tz, special_days: &config.special_days, roll: &mut || rand::random::<f64>() };
+        let happenings = self.pet.tick(now, &mut ctx);
         let name = self.pet.name.clone();
         for h in &happenings {
             let text = match h {
@@ -58,7 +61,9 @@ impl World {
                 Happening::Grew(_) => format!("{name} grew up a little!"),
                 Happening::FellAsleep => format!("{name} fell asleep"),
                 Happening::WokeUp => format!("{name} woke up"),
-                Happening::Pooped => continue,
+                Happening::Birthday(weeks) => game::birthday_text(&name, *weeks),
+                Happening::SpecialDay(text) => text.clone(),
+                Happening::Pooped | Happening::Wished(_) => continue,
             };
             self.db.add_event(self.pet.last_tick, &name, &text)?;
         }
@@ -90,7 +95,9 @@ async fn main() -> Result<()> {
     let config = Config {
         passcode: std::env::var("HAMMI_PASSCODE").context("HAMMI_PASSCODE must be set")?,
         tz: env_or("HAMMI_TZ", "Europe/Copenhagen").parse().map_err(|e| anyhow::anyhow!("HAMMI_TZ: {e}"))?,
+        special_days: SpecialDay::parse_list(&env_or("HAMMI_CELEBRATE", "")),
     };
+    tracing::info!("{} special day(s) configured", config.special_days.len());
     let clock = Clock {
         started_real: Instant::now(),
         started_at: Utc::now(),
@@ -106,7 +113,7 @@ async fn main() -> Result<()> {
         }
     };
     let mut world = World { db, pet, notify };
-    world.advance(clock.now(), config.tz)?;
+    world.advance(clock.now(), &config)?;
 
     let pusher = match (std::env::var("VAPID_PRIVATE_KEY"), std::env::var("VAPID_PUBLIC_KEY")) {
         (Ok(private), Ok(public)) => {
@@ -141,7 +148,7 @@ async fn ticker(state: Shared) {
         let due = {
             let mut w = state.world.lock().unwrap();
             let now = state.clock.now();
-            if let Err(e) = w.advance(now, state.config.tz) {
+            if let Err(e) = w.advance(now, &state.config) {
                 tracing::error!("tick failed: {e:#}");
                 continue;
             }
