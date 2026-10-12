@@ -1,0 +1,469 @@
+:root {
+  --page: #fdf1e7;
+  --page-dot: #f8e1d3;
+  --ink: #5a3a40;
+  --muted: #9a7a7f;
+  --shell-hi: #fff1ec;
+  --shell: #ffc8c4;
+  --shell-lo: #f39aa6;
+  --bezel: #fff8f0;
+  --bezel-edge: #f1d9cf;
+  --accent: #e8707f;
+  --accent-ink: #ffffff;
+  --button: #ffe29a;
+  --button-lo: #e8b44f;
+  --card: #ffffff;
+  --field: #fff8f3;
+  --field-edge: #efd6cc;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #2b2226;
+    --page-dot: #33282d;
+    --ink: #f7e4e4;
+    --muted: #c3a6ab;
+    --card: #3a2e33;
+    --field: #2f252a;
+    --field-edge: #57454c;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background-color: var(--page);
+  background-image: radial-gradient(var(--page-dot) 2px, transparent 2px);
+  background-size: 22px 22px;
+  color: var(--ink);
+  font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100dvh;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  display: flex;
+  justify-content: center;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+}
+
+/* ---------- Game page ---------- */
+
+.game {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding-top: 8px;
+}
+
+.gear {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px;
+  z-index: 2;
+}
+
+.gear svg {
+  width: 100%;
+  height: 100%;
+}
+
+.caption {
+  margin: 18px 0 0;
+  min-height: 1.4em;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
+/* ---------- The device ---------- */
+
+.device {
+  width: min(100%, 400px);
+  aspect-ratio: 0.8;
+  margin-top: 18px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 13%;
+  border-radius: 50% 50% 47% 47% / 56% 56% 44% 44%;
+  background: radial-gradient(circle at 34% 22%, var(--shell-hi) 0, var(--shell) 32%, var(--shell-lo) 100%);
+  box-shadow:
+    inset -12px -16px 0 rgba(160, 60, 80, 0.12),
+    inset 10px 12px 0 rgba(255, 255, 255, 0.45),
+    0 22px 40px rgba(190, 90, 105, 0.28);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.device-ring {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
+  border: 6px solid var(--shell-lo);
+  border-radius: 50%;
+  z-index: -1;
+}
+
+.device-brand {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: clamp(0.9rem, 4vw, 1.1rem);
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(170, 70, 90, 0.35);
+  margin-bottom: 3.5%;
+}
+
+.bezel {
+  width: 76%;
+  padding: 2.5% 3.5%;
+  border-radius: 26px;
+  background: var(--bezel);
+  box-shadow:
+    inset 0 3px 0 var(--bezel-edge),
+    0 2px 0 rgba(255, 255, 255, 0.6);
+}
+
+.icon-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+}
+
+.icon {
+  border: none;
+  background: transparent;
+  color: #6b4b51;
+  border-radius: 10px;
+  min-height: 44px;
+  padding: 5px 0 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition:
+    background 0.15s,
+    opacity 0.15s;
+}
+
+.icon svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.icon span {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.icon.selected {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.icon.disabled {
+  opacity: 0.32;
+}
+
+.lcd {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  margin: 4px 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.28),
+    0 0 0 3px #d9c9bd;
+}
+
+.lcd canvas {
+  display: block;
+  image-rendering: pixelated;
+  touch-action: manipulation;
+}
+
+.buttons {
+  margin-top: 4.5%;
+  width: 62%;
+  display: flex;
+  justify-content: space-between;
+}
+
+.hw-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.hw-B {
+  margin-top: 16px;
+}
+
+.hw-button button {
+  width: clamp(44px, 14vw, 54px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: none;
+  background: radial-gradient(circle at 35% 30%, #fff5d6 0, var(--button) 45%, var(--button-lo) 100%);
+  box-shadow:
+    0 4px 0 #c98e3c,
+    0 6px 10px rgba(150, 80, 40, 0.3);
+  transition:
+    transform 0.06s,
+    box-shadow 0.06s;
+}
+
+.hw-button button:active {
+  transform: translateY(3px);
+  box-shadow:
+    0 1px 0 #c98e3c,
+    0 2px 4px rgba(150, 80, 40, 0.3);
+}
+
+.hw-button span {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(170, 70, 90, 0.4);
+}
+
+/* ---------- Cards, forms ---------- */
+
+.card {
+  width: 100%;
+  background: var(--card);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(160, 90, 100, 0.15);
+}
+
+.card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.card h2 {
+  font-size: 1.1rem;
+}
+
+.log {
+  margin-top: 14px;
+}
+
+.log ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.log li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--field-edge);
+  font-size: 0.95rem;
+}
+
+.log li:first-child {
+  border-top: none;
+}
+
+.log time {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+}
+
+.field {
+  margin-top: 14px;
+}
+
+.card header + .field,
+.login .card > .field:first-child {
+  margin-top: 0;
+}
+
+.field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.field input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--field);
+  border: 2px solid var(--field-edge);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.field input:focus {
+  border-color: var(--accent);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  min-height: 44px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btn.secondary {
+  background: var(--field);
+  color: var(--ink);
+  border: 2px solid var(--field-edge);
+}
+
+.btn.wide {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 8px;
+  margin: -8px;
+}
+
+.error {
+  color: #d04a5c;
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(60, 30, 40, 0.35);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 10;
+}
+
+.settings {
+  max-width: 420px;
+}
+
+@media (min-width: 600px) {
+  .overlay {
+    align-items: center;
+  }
+}
+
+/* ---------- Login ---------- */
+
+.login {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 6vh;
+}
+
+.login-screen {
+  width: 168px;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--bezel);
+  box-shadow: 0 10px 24px rgba(190, 90, 105, 0.25);
+}
+
+.login-screen .lcd {
+  margin: 0;
+}
+
+.login h1 {
+  margin-top: 18px;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+}
+
+.login > p {
+  margin: 4px 0 20px;
+}
+
+.login .card {
+  text-align: left;
+}
