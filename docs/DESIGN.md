@@ -63,6 +63,30 @@ All actions are `POST /api/action` with `{ "type": ..., ... }`. Each returns the
 
 Actions on an `egg` return reaction `egg` and change nothing, except `pet` (`love`).
 
+`play` also takes `"game": "leftright" | "catch" | "jump"` (default `leftright`), used only for the diary line ("Emil played Seed Catch with Hammi and won 4/5").
+
+## Mini-games
+
+All run on the client and report a score of 0–5 as `won`. Choosing Play opens a picker on the LCD.
+
+| `game` | Name | How it plays | Score |
+|---|---|---|---|
+| `leftright` | Left or Right | Guess which way Hammi will turn, 5 rounds | rounds guessed |
+| `catch` | Seed Catch | Seeds fall for 20 s; move Hammi left/right (A/B or tap screen halves) to catch them | caught seeds / 3, max 5 |
+| `jump` | Wheel Run | Hammi runs on a wheel, pebbles scroll in; tap (B or screen) to jump. Ends at the first hit or after 20 pebbles | pebbles cleared / 4, max 5 |
+
+## Surprises
+
+**Wishes.** While Hammi is awake between 09:00 and 20:00 local and has no wish, each minute there is a 1-in-240 chance (about one wish every four hours) that it starts wishing for one of: `meal` (only if fullness < 80), `snack`, `play` (only if energy > 20), `clean` (only if poops > 0), `pet`. A wish lasts 2 hours, then fades with no penalty. Doing the wished-for action (with a non-refused reaction) grants it: extra fun +15, reaction `delighted` instead of the normal one, and a diary line "Emil granted Hammi's wish for a snack".
+
+**Daily gift.** Once per local day per player name, Hammi has found something. `POST /api/gift` claims it: the server picks one of 16 treasures (`acorn`, `sunflower`, `pebble`, `clover`, `feather`, `button`, `shell`, `ribbon`, `star`, `key`, `berry`, `leaf`, `marble`, `bell`, `heartstone`, `crown`). `crown` is rare (2%); otherwise items not yet in the treasure box are favoured (70% when any remain). The treasure box is shared by the household.
+
+**Birthdays.** Every 7 days after hatching Hammi has a birthday: a diary line, a milestone push ("Hammi is 2 weeks old today! 🎂") and `celebration` is set for that local day.
+
+**Special days.** `HAMMI_CELEBRATE` lists dates as `MM-DD|message` separated by `;` (e.g. `05-21|Happy birthday, love! 💐;08-14|Happy anniversary! 💕`). On that local date `celebration` carries the message, the diary gets it, and a milestone push goes out in the morning.
+
+**Seasonal hats** are client-only, from the device's local date: pumpkin Oct 24–31, Santa hat Dec 1–26, party hat Dec 31–Jan 1, heart Feb 14. A celebration (cake + party hat) takes precedence.
+
 ## Notifications
 
 The server checks once a minute and sends at most one push per 90 minutes. Each kind has a 4-hour cooldown. No pushes between 22:00 and 08:00 local time, or while Hammi is asleep. All copy is gentle, never guilt-tripping.
@@ -74,8 +98,10 @@ The server checks once a minute and sends at most one push per 90 minutes. Each 
 | tidy | poops ≥ 3 | "Hammi's cage could use a little tidy 🧹" |
 | hatched | egg hatches | "Hammi hatched! 🐣" |
 | grew | stage change | "Hammi grew up a little! 🎉" |
+| wish | a wish starts | "Hammi is daydreaming about a sunflower seed 💭" (copy per wish) |
+| birthday / special day | see Surprises | |
 
-Milestone pushes (hatched, grew) are queued through quiet hours and ignore the 90-minute limit.
+Milestone pushes (hatched, grew, birthday, special day) are queued through quiet hours and ignore the 90-minute limit.
 
 ## API
 
@@ -84,7 +110,9 @@ All `/api/*` routes except `login`, `health` and `push/key` require `Authorizati
 ```
 POST   /api/login           { passcode, name } → { token, name }      401 on wrong passcode
 GET    /api/state           → PetView
-POST   /api/action          { type, won? } → { state: PetView, reaction }
+POST   /api/action          { type, won?, game? } → { state: PetView, reaction }
+POST   /api/gift            → { item, isNew, state: PetView }          409 if already claimed today
+GET    /api/treasures       → { items: { item, count, firstFoundBy, firstFoundAt }[] }  found items only
 POST   /api/rename          { name } → PetView                         1–16 chars
 GET    /api/push/key        → { publicKey }                            VAPID public key, base64url
 POST   /api/push/subscribe  PushSubscription JSON (endpoint, keys.p256dh, keys.auth) → 204
@@ -108,6 +136,9 @@ type PetView = {
   mood: "happy" | "okay" | "sad";
   serverTime: string;         // ISO 8601
   events: { at: string; who: string; text: string }[]; // newest first, max 30
+  wish: "meal" | "snack" | "play" | "clean" | "pet" | null;
+  celebration: { kind: "birthday" | "special"; text: string } | null;
+  giftAvailable: boolean;     // for the requesting player
 };
 ```
 
@@ -124,4 +155,5 @@ Auth is a single shared household passcode (`HAMMI_PASSCODE`). Logging in with a
 | `VAPID_PRIVATE_KEY` / `VAPID_PUBLIC_KEY` | — | generate with `hammi-server gen-vapid`; push is disabled when unset |
 | `VAPID_SUBJECT` | `mailto:hammi@example.com` | |
 | `STATIC_DIR` | `../web/dist` | `/app/web` in the container |
+| `HAMMI_CELEBRATE` | — | special days, see Surprises |
 | `HAMMI_SPEED` | `1` | time multiplier for local testing (e.g. `60` = one hour per minute) |

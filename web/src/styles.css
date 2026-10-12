@@ -109,11 +109,68 @@ h2 {
   height: 100%;
 }
 
+.below {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
 .caption {
-  margin: 18px 0 0;
+  margin: 0;
   min-height: 1.4em;
   text-align: center;
   font-size: 0.95rem;
+}
+
+.banner {
+  margin: 4px 0 0;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 4px 14px rgba(190, 90, 105, 0.2);
+  font-weight: 700;
+  text-align: center;
+}
+
+.gift-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 2px dashed var(--accent);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.badge {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(232, 112, 127, 0.25);
+}
+
+.gift-result {
+  margin: 0;
+  text-align: center;
+  font-weight: 700;
+}
+
+.new {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+  vertical-align: 2px;
 }
 
 /* ---------- The device ---------- */
@@ -210,6 +267,24 @@ h2 {
 
 .icon.disabled {
   opacity: 0.32;
+}
+
+.icon.wished:not(.selected) {
+  background: #ffe9ec;
+  color: var(--accent);
+  animation: wish-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes wish-glow {
+  50% {
+    box-shadow: 0 0 0 3px rgba(232, 112, 127, 0.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon.wished:not(.selected) {
+    animation: none;
+  }
 }
 
 .lcd {
@@ -400,6 +475,106 @@ h2 {
   font-weight: 700;
   padding: 8px;
   margin: -8px;
+}
+
+.link.inline {
+  margin: 0;
+  padding: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.chip {
+  border: 2px solid var(--field-edge);
+  border-radius: 999px;
+  background: var(--field);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* ---------- Treasure box ---------- */
+
+.treasures {
+  margin-top: 14px;
+}
+
+.treasures > p {
+  margin-top: 0;
+}
+
+.treasure-grid {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.treasure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px;
+  border-radius: 12px;
+  background: var(--field);
+  text-align: center;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.treasure svg {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 2px;
+}
+
+.treasure strong {
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.treasure .count {
+  color: var(--accent);
+}
+
+.px-dark {
+  fill: #4a3238;
+}
+
+.px-mid {
+  fill: #d98a96;
+}
+
+.px-light {
+  fill: #fff6f0;
+}
+
+.treasure.missing svg rect {
+  fill: var(--field-edge);
+}
+
+.treasure.crown.found {
+  background: linear-gradient(160deg, #fff4c9, #ffd98a);
+  box-shadow: 0 0 0 2px #f2c14e;
+}
+
+.treasure.crown.found .px-mid {
+  fill: #e8a92e;
+}
+
+.treasure.crown.found strong,
+.treasure.crown.found .muted {
+  color: #6b4a12;
 }
 
 .error {

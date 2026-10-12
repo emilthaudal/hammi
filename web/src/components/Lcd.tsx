@@ -5,13 +5,11 @@ import type { Scene } from "../game/scene";
 
 type Props = {
   scene: Scene;
-  /** Called with the tap position as fractions of the screen size. */
-  onTap?: (fx: number, fy: number) => void;
+  /** Called when the screen is pressed (`down`) or released, at fractions of its size. */
+  onTouch?: (fx: number, fy: number, down: boolean) => void;
 };
 
-const FRAME_MS = 80;
-
-export function Lcd({ scene, onTap }: Props) {
+export function Lcd({ scene, onTouch }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -43,7 +41,7 @@ export function Lcd({ scene, onTap }: Props) {
 
     const loop = (t: number) => {
       raf = requestAnimationFrame(loop);
-      if (t - last < FRAME_MS) return;
+      if (t - last < scene.frameMs) return;
       last = t;
       scene.render(frame, t);
       const pal = scene.dark ? PALETTES.dark : PALETTES.light;
@@ -67,10 +65,13 @@ export function Lcd({ scene, onTap }: Props) {
         role="img"
         aria-label="Hammi's screen"
         onPointerDown={(e) => {
-          if (!onTap) return;
+          if (!onTouch) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
           const rect = e.currentTarget.getBoundingClientRect();
-          onTap((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+          onTouch((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, true);
         }}
+        onPointerUp={() => onTouch?.(0, 0, false)}
+        onPointerCancel={() => onTouch?.(0, 0, false)}
       />
     </div>
   );

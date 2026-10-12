@@ -6,10 +6,24 @@ use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::game::{is_quiet_hours, Happening, Pet, Stage};
+use crate::game::{birthday_text, is_quiet_hours, ActionKind, Happening, Pet, Stage};
 
 const MIN_GAP: Duration = Duration::minutes(90);
 const KIND_COOLDOWN: Duration = Duration::hours(4);
+/// Only nudge about a wish with at least this long left to grant it.
+const WISH_STILL_FRESH: Duration = Duration::minutes(60);
+
+fn wish_text(pet: &Pet) -> String {
+    let name = &pet.name;
+    match pet.wish.map(|w| w.kind) {
+        Some(ActionKind::Meal) => format!("{name} is daydreaming about a big bowl of food 💭"),
+        Some(ActionKind::Snack) => format!("{name} is daydreaming about a sunflower seed 💭"),
+        Some(ActionKind::Play) => format!("{name} would love to play a game with you 💭"),
+        Some(ActionKind::Clean) => format!("{name} is dreaming of a sparkly clean cage 💭"),
+        Some(ActionKind::Pet) => format!("{name} could really use a cuddle 💭"),
+        _ => String::new(),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
@@ -33,6 +47,8 @@ impl NotifyState {
                 Happening::Hatched => format!("{name} hatched! 🐣"),
                 Happening::Grew(Stage::Adult) => format!("{name} is all grown up! 🎉"),
                 Happening::Grew(_) => format!("{name} grew up a little! 🎉"),
+                Happening::Birthday(weeks) => birthday_text(name, *weeks),
+                Happening::SpecialDay(text) => text.clone(),
                 _ => continue,
             };
             self.pending.push(Note { title: name.clone(), body });
@@ -57,6 +73,7 @@ impl NotifyState {
             ("hungry", pet.fullness < 25.0, format!("{name}'s tummy is rumbling 🌻")),
             ("bored", pet.fun < 25.0, format!("{name} wants to play with you!")),
             ("tidy", pet.poops >= 3, format!("{name}'s cage could use a little tidy 🧹")),
+            ("wish", pet.wish.is_some_and(|w| w.until - now > WISH_STILL_FRESH), wish_text(pet)),
         ];
         for (kind, active, body) in needs {
             let cooled = self.last_by_kind.get(kind).is_none_or(|t| now - *t >= KIND_COOLDOWN);

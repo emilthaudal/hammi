@@ -1,4 +1,4 @@
-import type { ActionType, PetView, Reaction } from "./types";
+import type { ActionType, FoundTreasure, GameId, GiftResult, PetView, Reaction } from "./types";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -43,12 +43,17 @@ export const api = {
 
   state: (token: string) => request<PetView>("/api/state", { token }),
 
-  action: (token: string, type: ActionType, won?: number) =>
+  action: (token: string, type: ActionType, play?: { won: number; game: GameId }) =>
     request<{ state: PetView; reaction: Reaction }>("/api/action", {
       method: "POST",
       token,
-      body: won === undefined ? { type } : { type, won },
+      body: { type, ...play },
     }),
+
+  /** Throws ApiError with status 409 when today's gift was already claimed. */
+  gift: (token: string) => request<GiftResult>("/api/gift", { method: "POST", token }),
+
+  treasures: (token: string) => request<{ items: FoundTreasure[] }>("/api/treasures", { token }),
 
   rename: (token: string, name: string) =>
     request<PetView>("/api/rename", { method: "POST", token, body: { name } }),

@@ -20,6 +20,9 @@ const DEMO: PetView = {
   mood: "happy",
   serverTime: new Date().toISOString(),
   events: [],
+  wish: null,
+  celebration: null,
+  giftAvailable: false,
 };
 
 export function Login({ onLogin }: { onLogin: (s: Session) => void }) {

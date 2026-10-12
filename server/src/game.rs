@@ -1,7 +1,7 @@
 //! The pet simulation. Pure logic: no I/O, all time passed in explicitly.
 //! Rules are documented in docs/DESIGN.md.
 
-use chrono::{DateTime, Duration, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,69 @@ const KID_AT_HOURS: i64 = 24;
 const ADULT_AT_HOURS: i64 = 96;
 const MAX_POOPS: u8 = 4;
 const PET_CARE_COOLDOWN: Duration = Duration::minutes(10);
+const WISH_CHANCE_PER_MINUTE: f64 = 1.0 / 240.0;
+const WISH_LASTS: Duration = Duration::hours(2);
+const WISH_BONUS_FUN: f64 = 15.0;
+
+/// A configured date to celebrate every year, e.g. a birthday.
+#[derive(Debug, Clone)]
+pub struct SpecialDay {
+    pub month: u32,
+    pub day: u32,
+    pub text: String,
+}
+
+impl SpecialDay {
+    /// Parse `MM-DD|message;MM-DD|message`. Malformed entries are skipped.
+    pub fn parse_list(raw: &str) -> Vec<SpecialDay> {
+        raw.split(';')
+            .filter_map(|entry| {
+                let (date, text) = entry.split_once('|')?;
+                let (m, d) = date.trim().split_once('-')?;
+                let (month, day) = (m.parse().ok()?, d.parse().ok()?);
+                NaiveDate::from_ymd_opt(2024, month, day)?;
+                Some(SpecialDay { month, day, text: text.trim().to_string() })
+            })
+            .collect()
+    }
+
+    pub fn on(days: &[SpecialDay], date: NaiveDate) -> Option<&SpecialDay> {
+        days.iter().find(|d| d.month == date.month() && d.day == date.day())
+    }
+}
+
+/// Everything a tick needs from the outside world.
+pub struct Ctx<'a> {
+    pub tz: Tz,
+    pub special_days: &'a [SpecialDay],
+    /// Uniform random number in [0, 1).
+    pub roll: &'a mut dyn FnMut() -> f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wish {
+    pub kind: ActionKind,
+    pub until: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Game {
+    #[default]
+    Leftright,
+    Catch,
+    Jump,
+}
+
+impl Game {
+    fn title(self) -> &'static str {
+        match self {
+            Game::Leftright => "Left or Right",
+            Game::Catch => "Seed Catch",
+            Game::Jump => "Wheel Run",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -64,6 +127,14 @@ pub struct Pet {
     pub care: Care,
     pub last_counted_pet: Option<DateTime<Utc>>,
     pub last_tick: DateTime<Utc>,
+    #[serde(default)]
+    pub wish: Option<Wish>,
+    /// How many weekly birthdays have been celebrated.
+    #[serde(default)]
+    pub birthdays: u32,
+    /// Local date of the last tick, to notice when a new day starts.
+    #[serde(default)]
+    pub last_local_date: Option<NaiveDate>,
 }
 
 /// Something that happened during a tick, for the event log and notifications.
@@ -74,9 +145,12 @@ pub enum Happening {
     FellAsleep,
     WokeUp,
     Pooped,
+    Wished(ActionKind),
+    Birthday(u32),
+    SpecialDay(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ActionKind {
     Meal,
@@ -85,6 +159,35 @@ pub enum ActionKind {
     Clean,
     Pet,
     Lights,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Action {
+    pub kind: ActionKind,
+    /// Mini-game score 0–5, only for `Play`.
+    pub won: u8,
+    pub game: Game,
+}
+
+pub fn birthday_text(name: &str, weeks: u32) -> String {
+    match weeks {
+        1 => format!("{name} is 1 week old today! 🎂"),
+        n => format!("{name} is {n} weeks old today! 🎂"),
+    }
+}
+
+impl ActionKind {
+    /// "a snack", as in "granted Hammi's wish for a snack".
+    pub fn wish_noun(self) -> &'static str {
+        match self {
+            ActionKind::Meal => "a meal",
+            ActionKind::Snack => "a snack",
+            ActionKind::Play => "a game",
+            ActionKind::Clean => "a tidy cage",
+            ActionKind::Pet => "a cuddle",
+            ActionKind::Lights => "the lights",
+        }
+    }
 }
 
 pub struct Outcome {
@@ -130,7 +233,20 @@ impl Pet {
             care: Care::default(),
             last_counted_pet: None,
             last_tick: now,
+            wish: None,
+            birthdays: 0,
+            last_local_date: None,
         }
+    }
+
+    /// What Hammi is celebrating today, if anything: (kind, text) with kind "special" or "birthday".
+    pub fn celebration(&self, now: DateTime<Utc>, tz: Tz, special_days: &[SpecialDay]) -> Option<(&'static str, String)> {
+        if let Some(day) = SpecialDay::on(special_days, now.with_timezone(&tz).date_naive()) {
+            return Some(("special", day.text.clone()));
+        }
+        let age = now - self.hatched_at?;
+        let in_birthday_day = age >= Duration::days(7) && age.num_days() % 7 == 0;
+        in_birthday_day.then(|| ("birthday", birthday_text(&self.name, (age.num_days() / 7) as u32)))
     }
 
     pub fn mood(&self) -> Mood {
@@ -145,18 +261,27 @@ impl Pet {
     }
 
     /// Advance the simulation to `now` in steps of at most one minute.
-    pub fn tick(&mut self, now: DateTime<Utc>, tz: Tz) -> Vec<Happening> {
+    pub fn tick(&mut self, now: DateTime<Utc>, ctx: &mut Ctx) -> Vec<Happening> {
         let mut out = Vec::new();
         while self.last_tick < now {
             let step_end = (self.last_tick + Duration::minutes(1)).min(now);
             let hours = (step_end - self.last_tick).num_milliseconds() as f64 / 3_600_000.0;
-            self.step(step_end, hours, tz, &mut out);
+            self.step(step_end, hours, ctx, &mut out);
             self.last_tick = step_end;
         }
         out
     }
 
-    fn step(&mut self, at: DateTime<Utc>, hours: f64, tz: Tz, out: &mut Vec<Happening>) {
+    fn step(&mut self, at: DateTime<Utc>, hours: f64, ctx: &mut Ctx, out: &mut Vec<Happening>) {
+        let tz = ctx.tz;
+        let today = at.with_timezone(&tz).date_naive();
+        if self.last_local_date != Some(today) {
+            self.last_local_date = Some(today);
+            if let Some(day) = SpecialDay::on(ctx.special_days, today) {
+                out.push(Happening::SpecialDay(day.text.clone()));
+            }
+        }
+
         if self.stage == Stage::Egg {
             if at >= self.created_at + HATCH_AFTER {
                 self.stage = Stage::Baby;
@@ -191,7 +316,29 @@ impl Pet {
         } else if night || self.energy < 10.0 {
             self.asleep = true;
             self.napping = !night;
+            self.wish = None;
             out.push(Happening::FellAsleep);
+        }
+
+        if self.wish.is_some_and(|w| w.until <= at) {
+            self.wish = None;
+        }
+        let hour = at.with_timezone(&tz).hour();
+        if self.wish.is_none() && !self.asleep && (9..20).contains(&hour) && (ctx.roll)() < WISH_CHANCE_PER_MINUTE {
+            let mut options = vec![ActionKind::Snack, ActionKind::Pet];
+            if self.fullness < 80.0 {
+                options.push(ActionKind::Meal);
+            }
+            if self.energy > 20.0 {
+                options.push(ActionKind::Play);
+            }
+            if self.poops > 0 {
+                options.push(ActionKind::Clean);
+            }
+            let pick = ((ctx.roll)() * options.len() as f64) as usize;
+            let kind = options[pick.min(options.len() - 1)];
+            self.wish = Some(Wish { kind, until: at + WISH_LASTS });
+            out.push(Happening::Wished(kind));
         }
 
         let before = self.poops_due.len();
@@ -212,6 +359,10 @@ impl Pet {
                 self.stage = Stage::Adult;
                 self.form = Some(self.adult_form());
                 out.push(Happening::Grew(Stage::Adult));
+            }
+            if age >= Duration::days(7 * (self.birthdays as i64 + 1)) {
+                self.birthdays += 1;
+                out.push(Happening::Birthday(self.birthdays));
             }
         }
     }
@@ -235,8 +386,22 @@ impl Pet {
         self.energy = self.energy.clamp(0.0, 100.0);
     }
 
-    /// Apply a player action. `won` is only used by `Play`; `poop_delay_minutes` by `Meal`.
-    pub fn act(&mut self, kind: ActionKind, won: u8, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
+    /// Apply a player action. `poop_delay_minutes` is only used by meals.
+    pub fn act(&mut self, action: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
+        let mut outcome = self.act_inner(action, poop_delay_minutes, now);
+        let granted = outcome.log.is_some() || outcome.reaction == "love";
+        if granted && self.wish.is_some_and(|w| w.kind == action.kind) {
+            self.wish = None;
+            self.fun = (self.fun + WISH_BONUS_FUN).min(100.0);
+            outcome = Outcome {
+                reaction: "delighted",
+                log: Some(format!("granted {}'s wish for {}", self.name, action.kind.wish_noun())),
+            };
+        }
+        outcome
+    }
+
+    fn act_inner(&mut self, Action { kind, won, game }: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
         let name = self.name.clone();
         if self.stage == Stage::Egg {
             return Outcome::quiet(if kind == ActionKind::Pet { "love" } else { "egg" });
@@ -267,7 +432,7 @@ impl Pet {
                 self.fun += 10.0 + 6.0 * won as f64;
                 self.energy -= 8.0;
                 self.care.plays += 1;
-                Outcome { reaction: "happy", log: Some(format!("played with {name} and won {won}/5")) }
+                Outcome { reaction: "happy", log: Some(format!("played {} with {name} and won {won}/5", game.title())) }
             }
             ActionKind::Clean => {
                 if self.poops == 0 {
@@ -319,28 +484,79 @@ mod tests {
 
     fn hatched(now: DateTime<Utc>) -> Pet {
         let mut p = Pet::new(now - Duration::minutes(6));
-        p.tick(now, TZ);
+        p.t(now);
         p
+    }
+
+    impl Pet {
+        /// Tick with no wishes and no special days.
+        fn t(&mut self, now: DateTime<Utc>) -> Vec<Happening> {
+            self.tick(now, &mut Ctx { tz: TZ, special_days: &[], roll: &mut || 1.0 })
+        }
+
+        fn a(&mut self, kind: ActionKind, won: u8, poop_delay: i64, now: DateTime<Utc>) -> Outcome {
+            self.act(Action { kind, won, game: Game::Leftright }, poop_delay, now)
+        }
+    }
+
+    #[test]
+    fn wishes_appear_by_day_fade_and_can_be_granted() {
+        let mut p = hatched(noon());
+        let events = p.tick(noon() + Duration::minutes(2), &mut Ctx { tz: TZ, special_days: &[], roll: &mut || 0.0 });
+        assert!(matches!(events.as_slice(), [Happening::Wished(ActionKind::Snack)]));
+        let fun = p.fun;
+        let o = p.a(ActionKind::Snack, 0, 0, noon() + Duration::minutes(2));
+        assert_eq!(o.reaction, "delighted");
+        assert_eq!(o.log.as_deref(), Some("granted Hammi's wish for a snack"));
+        assert!(p.fun >= fun + 12.0 + 15.0 - 0.1);
+        assert!(p.wish.is_none());
+
+        p.wish = Some(Wish { kind: ActionKind::Pet, until: noon() + Duration::hours(1) });
+        p.t(noon() + Duration::minutes(61));
+        assert!(p.wish.is_none(), "wishes fade quietly");
+
+        let mut p = hatched(noon() + Duration::hours(9)); // 21:00, outside wish hours
+        p.tick(noon() + Duration::hours(9) + Duration::minutes(5), &mut Ctx { tz: TZ, special_days: &[], roll: &mut || 0.0 });
+        assert!(p.wish.is_none());
+    }
+
+    #[test]
+    fn celebrates_weekly_birthdays_and_special_days() {
+        let mut p = hatched(noon());
+        let events = p.t(noon() + Duration::days(7) + Duration::minutes(1));
+        assert!(events.contains(&Happening::Birthday(1)));
+        assert_eq!(
+            p.celebration(noon() + Duration::days(7) + Duration::hours(1), TZ, &[]),
+            Some(("birthday", "Hammi is 1 week old today! 🎂".to_string()))
+        );
+        assert_eq!(p.celebration(noon() + Duration::days(8) + Duration::hours(1), TZ, &[]), None);
+
+        let days = SpecialDay::parse_list("06-02|Happy birthday, love! 💐; bad; 13-40|nope");
+        assert_eq!(days.len(), 1);
+        let mut p = hatched(noon());
+        let events = p.tick(noon() + Duration::days(1), &mut Ctx { tz: TZ, special_days: &days, roll: &mut || 1.0 });
+        assert!(events.contains(&Happening::SpecialDay("Happy birthday, love! 💐".into())));
+        assert_eq!(p.celebration(noon() + Duration::days(1), TZ, &days).unwrap().0, "special");
     }
 
     #[test]
     fn egg_hatches_after_five_minutes() {
         let mut p = Pet::new(noon());
-        assert!(p.tick(noon() + Duration::minutes(4), TZ).is_empty());
+        assert!(p.t(noon() + Duration::minutes(4)).is_empty());
         assert_eq!(p.stage, Stage::Egg);
-        assert_eq!(p.tick(noon() + Duration::minutes(5), TZ), vec![Happening::Hatched]);
+        assert_eq!(p.t(noon() + Duration::minutes(5)), vec![Happening::Hatched]);
         assert_eq!(p.stage, Stage::Baby);
     }
 
     #[test]
     fn stats_decay_while_awake_and_never_go_negative() {
         let mut p = hatched(noon());
-        p.tick(noon() + Duration::hours(4), TZ);
+        p.t(noon() + Duration::hours(4));
         assert!((p.fullness - (70.0 - 24.0)).abs() < 0.5, "fullness {}", p.fullness);
         assert!((p.fun - (70.0 - 32.0)).abs() < 0.5, "fun {}", p.fun);
 
         let mut p = hatched(noon());
-        p.tick(noon() + Duration::days(5), TZ);
+        p.t(noon() + Duration::days(5));
         assert!(p.fullness >= 0.0 && p.fun >= 0.0 && p.energy >= 0.0);
         assert_eq!(p.mood(), Mood::Sad);
     }
@@ -348,10 +564,10 @@ mod tests {
     #[test]
     fn sleeps_at_night_and_wakes_in_the_morning() {
         let mut p = hatched(noon());
-        p.tick(noon() + Duration::hours(10), TZ); // 22:00
+        p.t(noon() + Duration::hours(10)); // 22:00
         assert!(p.asleep && !p.napping);
         p.lights_off = true;
-        p.tick(noon() + Duration::hours(20), TZ); // 08:00
+        p.t(noon() + Duration::hours(20)); // 08:00
         assert!(!p.asleep);
         assert!(!p.lights_off, "lights come back on at wake-up");
     }
@@ -360,9 +576,9 @@ mod tests {
     fn naps_when_exhausted_and_wakes_rested() {
         let mut p = hatched(noon());
         p.energy = 10.5;
-        p.tick(noon() + Duration::minutes(10), TZ);
+        p.t(noon() + Duration::minutes(10));
         assert!(p.asleep && p.napping);
-        p.tick(noon() + Duration::hours(7), TZ);
+        p.t(noon() + Duration::hours(7));
         assert!(!p.asleep);
         assert!(p.energy >= 90.0, "woke rested about an hour ago, energy {}", p.energy);
     }
@@ -370,33 +586,33 @@ mod tests {
     #[test]
     fn meal_makes_a_poop_later_and_clean_removes_it() {
         let mut p = hatched(noon());
-        let o = p.act(ActionKind::Meal, 0, 90, noon());
+        let o = p.a(ActionKind::Meal, 0, 90, noon());
         assert_eq!(o.reaction, "yum");
-        p.tick(noon() + Duration::minutes(89), TZ);
+        p.t(noon() + Duration::minutes(89));
         assert_eq!(p.poops, 0);
-        p.tick(noon() + Duration::minutes(91), TZ);
+        p.t(noon() + Duration::minutes(91));
         assert_eq!(p.poops, 1);
-        assert_eq!(p.act(ActionKind::Clean, 0, 0, noon()).reaction, "clean");
+        assert_eq!(p.a(ActionKind::Clean, 0, 0, noon()).reaction, "clean");
         assert_eq!(p.poops, 0);
-        assert_eq!(p.act(ActionKind::Clean, 0, 0, noon()).reaction, "nothing");
+        assert_eq!(p.a(ActionKind::Clean, 0, 0, noon()).reaction, "nothing");
     }
 
     #[test]
     fn refuses_meal_when_full_and_food_while_asleep() {
         let mut p = hatched(noon());
         p.fullness = 96.0;
-        assert_eq!(p.act(ActionKind::Meal, 0, 90, noon()).reaction, "full");
+        assert_eq!(p.a(ActionKind::Meal, 0, 90, noon()).reaction, "full");
         p.asleep = true;
-        assert_eq!(p.act(ActionKind::Snack, 0, 0, noon()).reaction, "asleep");
-        assert_eq!(p.act(ActionKind::Lights, 0, 0, noon()).reaction, "lights_off");
+        assert_eq!(p.a(ActionKind::Snack, 0, 0, noon()).reaction, "asleep");
+        assert_eq!(p.a(ActionKind::Lights, 0, 0, noon()).reaction, "lights_off");
     }
 
     #[test]
     fn petting_counts_for_care_once_per_ten_minutes() {
         let mut p = hatched(noon());
-        assert!(p.act(ActionKind::Pet, 0, 0, noon()).log.is_some());
-        assert!(p.act(ActionKind::Pet, 0, 0, noon() + Duration::minutes(5)).log.is_none());
-        assert!(p.act(ActionKind::Pet, 0, 0, noon() + Duration::minutes(10)).log.is_some());
+        assert!(p.a(ActionKind::Pet, 0, 0, noon()).log.is_some());
+        assert!(p.a(ActionKind::Pet, 0, 0, noon() + Duration::minutes(5)).log.is_none());
+        assert!(p.a(ActionKind::Pet, 0, 0, noon() + Duration::minutes(10)).log.is_some());
         assert_eq!(p.care.pets, 2);
     }
 
@@ -405,13 +621,13 @@ mod tests {
         let mut p = hatched(noon());
         p.care.plays = 20;
         p.care.meals = 5;
-        let events = p.tick(noon() + Duration::hours(97), TZ);
+        let events = p.t(noon() + Duration::hours(97));
         assert!(events.contains(&Happening::Grew(Stage::Kid)));
         assert!(events.contains(&Happening::Grew(Stage::Adult)));
         assert_eq!(p.form, Some(Form::Zoomy));
 
         let mut p = hatched(noon());
-        p.tick(noon() + Duration::hours(97), TZ);
+        p.t(noon() + Duration::hours(97));
         assert_eq!(p.form, Some(Form::Snuggly), "no care at all still gives a cute form");
     }
 }
