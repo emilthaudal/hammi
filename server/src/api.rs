@@ -105,7 +105,7 @@ fn view(w: &World, now: DateTime<Utc>, config: &Config, who: &str) -> ApiResult<
         name: p.name.clone(),
         stage: p.stage,
         form: p.form,
-        hatches_at: (p.stage == Stage::Egg).then(|| p.created_at + chrono::Duration::minutes(5)),
+        hatches_at: p.hatches_at(),
         age_days: p.hatched_at.map_or(0.0, |h| (now - h).num_seconds().max(0) as f64 / 86_400.0),
         fullness: p.fullness.round() as u8,
         fun: p.fun.round() as u8,
@@ -145,7 +145,14 @@ async fn login(State(s): State<Shared>, Json(req): Json<LoginReq>) -> ApiResult<
     }
     let name = clean_name(&req.name, 24)?;
     let token = hex::encode(rand::random::<[u8; 32]>());
-    s.world.lock().unwrap().db.create_session(&token, &name)?;
+    let mut w = s.world.lock().unwrap();
+    w.db.create_session(&token, &name)?;
+    let now = s.clock.now();
+    w.advance(now, &s.config)?;
+    if w.pet.find_egg(now) {
+        w.db.add_event(now, &name, &format!("{name} found a little egg 🥚"))?;
+        w.db.save_world(&w.pet, &w.notify)?;
+    }
     Ok(Json(LoginRes { token, name }))
 }
 

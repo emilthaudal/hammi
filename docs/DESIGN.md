@@ -34,7 +34,7 @@ Deployed as one Railway service from the root `Dockerfile`, with a volume mounte
 
 | Stage | When | |
 |---|---|---|
-| `egg` | first 5 minutes after creation | wobbles, then hatches |
+| `egg` | until 5 minutes after the first login ("found a little egg") | wobbles, then hatches; nothing happens before anyone logs in |
 | `baby` | 0–24h after hatching | |
 | `kid` | 24h–96h | |
 | `adult` | 96h+ | form chosen once at the transition, permanent |
