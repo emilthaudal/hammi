@@ -179,7 +179,7 @@ async fn action(State(s): State<Shared>, Player(who): Player, Json(req): Json<Ac
     let action = Action { kind: req.kind, won: req.won, game: req.game };
     let outcome = w.pet.act(action, rand::random_range(60..=120), now);
     if let Some(log) = &outcome.log {
-        w.db.add_event(now, &who, &format!("{who} {log}"))?;
+        w.db.add_or_merge_event(now, &who, &format!("{who} {log}"), chrono::Duration::minutes(30))?;
     }
     w.db.save_world(&w.pet, &w.notify)?;
     Ok(Json(ActionRes { state: view(&w, now, &s.config, &who)?, reaction: outcome.reaction }))

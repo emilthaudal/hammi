@@ -10,6 +10,11 @@ const KID_AT_HOURS: i64 = 24;
 const ADULT_AT_HOURS: i64 = 96;
 const MAX_POOPS: u8 = 4;
 const PET_CARE_COOLDOWN: Duration = Duration::minutes(10);
+/// Fun from each cuddle within one cuddle window; later cuddles give none.
+const CUDDLE_FUN: [f64; 3] = [5.0, 3.0, 1.0];
+const SNACK_WINDOW: Duration = Duration::hours(1);
+const SNACKS_PER_WINDOW: usize = 3;
+const SNACK_CARE_COOLDOWN: Duration = Duration::minutes(30);
 const WISH_CHANCE_PER_MINUTE: f64 = 1.0 / 240.0;
 const WISH_LASTS: Duration = Duration::hours(2);
 const WISH_BONUS_FUN: f64 = 15.0;
@@ -135,6 +140,14 @@ pub struct Pet {
     /// Local date of the last tick, to notice when a new day starts.
     #[serde(default)]
     pub last_local_date: Option<NaiveDate>,
+    /// Snacks eaten in the last hour.
+    #[serde(default)]
+    pub recent_snacks: Vec<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_counted_snack: Option<DateTime<Utc>>,
+    /// Start of the current cuddle window and how many cuddles it has had.
+    #[serde(default)]
+    pub cuddle_window: Option<(DateTime<Utc>, u32)>,
 }
 
 /// Something that happened during a tick, for the event log and notifications.
@@ -236,6 +249,9 @@ impl Pet {
             wish: None,
             birthdays: 0,
             last_local_date: None,
+            recent_snacks: Vec::new(),
+            last_counted_snack: None,
+            cuddle_window: None,
         }
     }
 
@@ -422,9 +438,17 @@ impl Pet {
                 Outcome { reaction: "yum", log: Some(format!("fed {name} a meal")) }
             }
             ActionKind::Snack => {
+                self.recent_snacks.retain(|t| now - *t < SNACK_WINDOW);
+                if self.recent_snacks.len() >= SNACKS_PER_WINDOW {
+                    return Outcome::quiet("full");
+                }
+                self.recent_snacks.push(now);
                 self.fullness += 8.0;
                 self.fun += 12.0;
-                self.care.snacks += 1;
+                if self.last_counted_snack.is_none_or(|t| now - t >= SNACK_CARE_COOLDOWN) {
+                    self.last_counted_snack = Some(now);
+                    self.care.snacks += 1;
+                }
                 Outcome { reaction: "yum", log: Some(format!("gave {name} a sunflower seed")) }
             }
             ActionKind::Play => {
@@ -446,7 +470,13 @@ impl Pet {
                 if self.asleep {
                     return Outcome::quiet("love");
                 }
-                self.fun += 5.0;
+                let cuddles = match self.cuddle_window {
+                    Some((start, n)) if now - start < PET_CARE_COOLDOWN => n + 1,
+                    _ => 1,
+                };
+                let start = if cuddles == 1 { now } else { self.cuddle_window.unwrap().0 };
+                self.cuddle_window = Some((start, cuddles));
+                self.fun += CUDDLE_FUN.get(cuddles as usize - 1).copied().unwrap_or(0.0);
                 let counts = self.last_counted_pet.is_none_or(|t| now - t >= PET_CARE_COOLDOWN);
                 if counts {
                     self.last_counted_pet = Some(now);
@@ -497,6 +527,26 @@ mod tests {
         fn a(&mut self, kind: ActionKind, won: u8, poop_delay: i64, now: DateTime<Utc>) -> Outcome {
             self.act(Action { kind, won, game: Game::Leftright }, poop_delay, now)
         }
+    }
+
+    #[test]
+    fn snacks_and_cuddles_wear_off_instead_of_being_spammable() {
+        let mut p = hatched(noon());
+        for i in 0..3 {
+            assert_eq!(p.a(ActionKind::Snack, 0, 0, noon() + Duration::minutes(i)).reaction, "yum");
+        }
+        assert_eq!(p.a(ActionKind::Snack, 0, 0, noon() + Duration::minutes(5)).reaction, "full");
+        assert_eq!(p.care.snacks, 1, "snacks count towards the adult form once per 30 minutes");
+        assert_eq!(p.a(ActionKind::Snack, 0, 0, noon() + Duration::minutes(61)).reaction, "yum");
+
+        let mut p = hatched(noon());
+        p.fun = 50.0;
+        for i in 0..6 {
+            assert_eq!(p.a(ActionKind::Pet, 0, 0, noon() + Duration::seconds(i)).reaction, "love");
+        }
+        assert!((p.fun - 59.0).abs() < 0.01, "5 + 3 + 1 then nothing, fun {}", p.fun);
+        p.a(ActionKind::Pet, 0, 0, noon() + Duration::minutes(11));
+        assert!((p.fun - 64.0).abs() < 0.01, "a new window starts fresh");
     }
 
     #[test]
