@@ -4,7 +4,17 @@ import * as S from "./sprites";
 
 // Drawing Hammi: faces, hats and the little effects shared by the scene and the mini-games.
 
-export type Expr = "normal" | "blink" | "happy" | "sad" | "eat" | "eatOpen" | "nope" | "love" | "sleep";
+export type Expr =
+  | "normal"
+  | "blink"
+  | "drowsy"
+  | "happy"
+  | "sad"
+  | "eat"
+  | "eatOpen"
+  | "nope"
+  | "love"
+  | "sleep";
 
 export const GROUND = 31; // sprites stand with their last row on y = 30
 export const HOP = [0, -1, -2, -3, -3, -2, -1, 0];
@@ -60,6 +70,11 @@ export function composeHammi(body: S.Body, frame: number, expr: Expr, look = 0):
         row(bottom);
         put(b, x - 1, bottom - 1, 2);
         put(b, x + w, bottom - 1, 2);
+        break;
+      case "drowsy":
+        // Half-closed: a grey lid over the top of the eye.
+        for (let y = top; y <= bottom; y++)
+          for (let i = 0; i < w; i++) put(b, x + i, y, y < top + Math.ceil(f.eyeH / 2) ? 1 : 2);
         break;
       default:
         for (let y = top; y <= bottom; y++) row(y);
