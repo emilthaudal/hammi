@@ -70,6 +70,23 @@ Actions on an `egg` return reaction `egg` and change nothing, except `pet` (`lov
 
 `play` also takes `"game": "leftright" | "catch" | "jump"` (default `leftright`), used only for the diary line ("Emil played Seed Catch with Hammi and won 4/5").
 
+## Food
+
+`meal` and `snack` take `"food"`; choosing Meal or Snack opens a food picker on the LCD. All foods of a kind have the same effect; the choice is flavour, plus Hammi's favourite.
+
+| Kind | `food` | Name | Diary |
+|---|---|---|---|
+| meal | `seeds` (default) | Seed mix | "fed Hammi a bowl of seed mix" |
+| meal | `carrot` | Carrot | "fed Hammi a carrot" |
+| meal | `corn` | Corn | "fed Hammi some corn" |
+| snack | `sunflower` (default) | Sunflower seed | "gave Hammi a sunflower seed" |
+| snack | `strawberry` | Strawberry | "gave Hammi a strawberry" |
+| snack | `peanut` | Peanut | "gave Hammi a peanut" |
+
+A food of the wrong kind (e.g. a meal with `strawberry`) is a 400.
+
+**Favourite food.** Each Hammi gets one secret favourite out of the six, picked at random the first time it eats. Eating it gives extra fun +8 and reaction `favourite` (a wish still wins: `delighted`). The first time it's eaten, the diary says "Emil found out Hammi's favourite food is strawberries!" and from then on `favouriteFood` is set in PetView; until then it is null.
+
 ## Mini-games
 
 All run on the client and report a score of 0–5 as `won`. Choosing Play opens a picker on the LCD.
@@ -115,7 +132,7 @@ All `/api/*` routes except `login`, `health` and `push/key` require `Authorizati
 ```
 POST   /api/login           { passcode, name } → { token, name }      401 on wrong passcode
 GET    /api/state           → PetView
-POST   /api/action          { type, won?, game? } → { state: PetView, reaction }
+POST   /api/action          { type, won?, game?, food? } → { state: PetView, reaction }
 POST   /api/gift            → { item, isNew, state: PetView }          409 if already claimed today
 GET    /api/treasures       → { items: { item, count, firstFoundBy, firstFoundAt }[] }  found items only
 POST   /api/rename          { name } → PetView                         1–16 chars
@@ -144,6 +161,7 @@ type PetView = {
   wish: "meal" | "snack" | "play" | "clean" | "pet" | null;
   celebration: { kind: "birthday" | "special"; text: string } | null;
   giftAvailable: boolean;     // for the requesting player
+  favouriteFood: "seeds" | "carrot" | "corn" | "sunflower" | "strawberry" | "peanut" | null; // once discovered
 };
 ```
 

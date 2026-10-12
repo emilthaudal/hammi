@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{Event, PushSub, Treasure};
-use crate::game::{Action, ActionKind, Form, Game, Mood, Stage};
+use crate::game::{Action, ActionKind, Food, Form, Game, Mood, Stage};
 use crate::{gifts, Config, Shared, World};
 
 pub fn router(state: Shared) -> Router {
@@ -87,6 +87,7 @@ pub struct PetView {
     wish: Option<ActionKind>,
     celebration: Option<Celebration>,
     gift_available: bool,
+    favourite_food: Option<Food>,
 }
 
 #[derive(Serialize)]
@@ -100,6 +101,7 @@ fn view(w: &World, now: DateTime<Utc>, config: &Config, who: &str) -> ApiResult<
     let today = now.with_timezone(&config.tz).date_naive();
     Ok(PetView {
         wish: p.wish.map(|w| w.kind),
+        favourite_food: p.favourite_food.filter(|_| p.favourite_known),
         celebration: p.celebration(now, config.tz, &config.special_days).map(|(kind, text)| Celebration { kind, text }),
         gift_available: p.stage != Stage::Egg && !w.db.gift_claimed(who, today)?,
         name: p.name.clone(),
@@ -171,6 +173,7 @@ struct ActionReq {
     won: u8,
     #[serde(default)]
     game: Game,
+    food: Option<Food>,
 }
 
 #[derive(Serialize)]
@@ -183,10 +186,26 @@ async fn action(State(s): State<Shared>, Player(who): Player, Json(req): Json<Ac
     let mut w = s.world.lock().unwrap();
     let now = s.clock.now();
     w.advance(now, &s.config)?;
-    let action = Action { kind: req.kind, won: req.won, game: req.game };
+    if let Some(food) = req.food {
+        let fits = match req.kind {
+            ActionKind::Meal => food.is_meal(),
+            ActionKind::Snack => !food.is_meal(),
+            _ => false,
+        };
+        if !fits {
+            return Err(bad_request("that food doesn't go with that action"));
+        }
+    }
+    if matches!(req.kind, ActionKind::Meal | ActionKind::Snack) {
+        w.pet.ensure_favourite(rand::random::<f64>());
+    }
+    let action = Action { kind: req.kind, won: req.won, game: req.game, food: req.food };
     let outcome = w.pet.act(action, rand::random_range(60..=120), now);
     if let Some(log) = &outcome.log {
         w.db.add_or_merge_event(now, &who, &format!("{who} {log}"), chrono::Duration::minutes(30))?;
+    }
+    if let Some(discovery) = &outcome.discovery {
+        w.db.add_event(now, &who, &format!("{who} {discovery}"))?;
     }
     w.db.save_world(&w.pet, &w.notify)?;
     Ok(Json(ActionRes { state: view(&w, now, &s.config, &who)?, reaction: outcome.reaction }))

@@ -19,10 +19,25 @@ export interface MiniGame {
 export const MAX_SCORE = 5;
 export const END_SCREEN_MS = 2600;
 
-export const GAMES: { id: GameId; label: string; title: string }[] = [
-  { id: "leftright", label: "L OR R", title: "Left or Right" },
-  { id: "catch", label: "CATCH", title: "Seed Catch" },
-  { id: "jump", label: "WHEEL", title: "Wheel Run" },
+export const GAMES: { id: GameId; label: string; title: string; howTo: string }[] = [
+  {
+    id: "leftright",
+    label: "L OR R",
+    title: "Left or Right",
+    howTo: "Guess which way Hammi will turn: A or the left of the screen for left, B or the right for right.",
+  },
+  {
+    id: "catch",
+    label: "CATCH",
+    title: "Seed Catch",
+    howTo: "Catch the falling seeds! Hold A or B (or the left or right of the screen) to scoot Hammi.",
+  },
+  {
+    id: "jump",
+    label: "WHEEL",
+    title: "Wheel Run",
+    howTo: "Tap B or the screen to hop over the pebbles.",
+  },
 ];
 
 /** Shared end screen: a line of text, the score as hearts, and a happy Hammi. */

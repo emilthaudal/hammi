@@ -618,6 +618,92 @@ h2 {
 
 .settings {
   max-width: 420px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- How to play ---------- */
+
+.how-to details {
+  border-top: 1px solid var(--field-edge);
+}
+
+.how-to details:last-child {
+  border-bottom: 1px solid var(--field-edge);
+}
+
+.how-to summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.how-to summary::-webkit-details-marker {
+  display: none;
+}
+
+.how-to summary::after {
+  content: "+";
+  color: var(--accent);
+  font-size: 1.2rem;
+}
+
+.how-to details[open] summary::after {
+  content: "−";
+}
+
+.how-to p,
+.how-to li {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.how-to p {
+  margin: 0 0 10px;
+}
+
+.how-to ul {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.icon-help li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.icon-help svg {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  fill: currentColor;
+}
+
+.game-help li {
+  padding: 4px 0;
+}
+
+/* ---------- Game explanations ---------- */
+
+.hint {
+  margin: 0;
+  max-width: 340px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 4px 14px rgba(190, 90, 105, 0.15);
+  text-align: center;
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 @media (min-width: 600px) {

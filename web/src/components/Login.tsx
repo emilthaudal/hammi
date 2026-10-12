@@ -23,6 +23,7 @@ const DEMO: PetView = {
   wish: null,
   celebration: null,
   giftAvailable: false,
+  favouriteFood: null,
 };
 
 export function Login({ onLogin }: { onLogin: (s: Session) => void }) {

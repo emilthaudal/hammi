@@ -22,8 +22,10 @@ export type PetView = {
   wish: Wish | null;
   celebration: Celebration | null;
   giftAvailable: boolean;
+  favouriteFood: FoodId | null;
 };
 
+export type FoodId = "seeds" | "carrot" | "corn" | "sunflower" | "strawberry" | "peanut";
 export type Wish = "meal" | "snack" | "play" | "clean" | "pet";
 export type Celebration = { kind: "birthday" | "special"; text: string };
 
@@ -53,6 +55,7 @@ export type GiftResult = { item: TreasureId; isNew: boolean; state: PetView };
 
 export type Reaction =
   | "delighted"
+  | "favourite"
   | "yum"
   | "full"
   | "happy"
