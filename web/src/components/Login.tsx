@@ -16,6 +16,7 @@ const DEMO: PetView = {
   energy: 100,
   poops: 0,
   asleep: false,
+  groggy: false,
   lightsOff: false,
   mood: "happy",
   serverTime: new Date().toISOString(),

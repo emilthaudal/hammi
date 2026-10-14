@@ -40,6 +40,7 @@ const DURATION: Record<SceneReaction, number> = {
   lights_on: 900,
   lights_off: 600,
   asleep: 2000,
+  yawn: 2200,
   egg: 1600,
   grow: 3000,
   hatch: 3200,
@@ -352,7 +353,7 @@ export class Scene {
 
     // Wandering, paused while a reaction plays.
     this.x = Math.min(Math.max(this.x, min), max);
-    if (!r) this.wander(t, body.step * (p.mood === "sad" ? 1.8 : 1), min, max);
+    if (!r) this.wander(t, body.step * (p.groggy ? 2.2 : p.mood === "sad" ? 1.8 : 1), min, max);
     else this.moving = false;
 
     let expr: Expr = p.mood === "sad" ? "sad" : "normal";
@@ -366,7 +367,7 @@ export class Scene {
     let dy = 0;
     const frame = Math.floor(t / (this.moving ? body.step * 2 : 600)) % 2;
 
-    if (!r && p.mood === "happy") {
+    if (!r && p.mood === "happy" && !p.groggy) {
       if (t > this.nextHop) {
         this.hopAt = t;
         this.nextHop = t + 4000 + Math.random() * 5000;
@@ -444,6 +445,11 @@ export class Scene {
             expr = e < 400 ? "blink" : "normal";
             blit(f, S.bulb, 2, 2);
             break;
+          case "yawn":
+            // Just woken: a big stretchy yawn, then a sleepy smile.
+            expr = e < 1400 ? "yawn" : "happy";
+            if (e < 1400) dy = e < 700 ? -1 : 0;
+            break;
           case "gift":
             // Watch the present, then hop with joy once it's open.
             flip = true;
@@ -459,6 +465,13 @@ export class Scene {
     // Gentle in-character hints: a tired Hammi's eyes droop now and then.
     const needs = needsOf(p);
     if (!r && needs.tired && expr !== "happy" && expr !== "blink" && t % 5200 < 1800) expr = "drowsy";
+
+    // A woken-up Hammi is heavy-eyed and yawns every few seconds, with a little z drifting off.
+    if (!r && p.groggy && expr !== "blink") {
+      const c = t % 7000;
+      expr = c < 1100 ? "yawn" : "drowsy";
+      if (c < 1100) blit(f, S.zSmall, Math.min(W - 3, this.x + w), Math.max(0, top - 3 - Math.floor(c / 400)));
+    }
 
     // A wish shows as a thought bubble; otherwise a sad Hammi has a little raincloud.
     let bubble: [number, number] | null = null;

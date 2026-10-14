@@ -19,6 +19,9 @@ const FAVOURITE_BONUS_FUN: f64 = 8.0;
 const WISH_CHANCE_PER_MINUTE: f64 = 1.0 / 240.0;
 const WISH_LASTS: Duration = Duration::hours(2);
 const WISH_BONUS_FUN: f64 = 15.0;
+/// How long a woken-up Hammi stays awake with nobody doing anything, by lights on / off.
+const DOZE_OFF_LIGHTS_ON: Duration = Duration::minutes(10);
+const DOZE_OFF_LIGHTS_OFF: Duration = Duration::minutes(5);
 
 /// A configured date to celebrate every year, e.g. a birthday.
 #[derive(Debug, Clone)]
@@ -157,6 +160,10 @@ pub struct Pet {
     pub favourite_food: Option<Food>,
     #[serde(default)]
     pub favourite_known: bool,
+    /// Set while Hammi is up past its sleep because someone woke it: when anyone last did something.
+    /// Hammi dozes off again after a quiet spell.
+    #[serde(default)]
+    pub groggy_since: Option<DateTime<Utc>>,
 }
 
 /// Something that happened during a tick, for the event log and notifications.
@@ -315,6 +322,7 @@ impl Pet {
             cuddle_window: None,
             favourite_food: None,
             favourite_known: false,
+            groggy_since: None,
         }
     }
 
@@ -406,11 +414,16 @@ impl Pet {
                 self.lights_off = false;
                 out.push(Happening::WokeUp);
             }
+        } else if let Some(last) = self.groggy_since {
+            let sleepy = night || self.energy < 10.0;
+            let doze_after = if self.lights_off { DOZE_OFF_LIGHTS_OFF } else { DOZE_OFF_LIGHTS_ON };
+            if !sleepy {
+                self.groggy_since = None;
+            } else if at - last >= doze_after {
+                self.fall_asleep(night, out);
+            }
         } else if night || self.energy < 10.0 {
-            self.asleep = true;
-            self.napping = !night;
-            self.wish = None;
-            out.push(Happening::FellAsleep);
+            self.fall_asleep(night, out);
         }
 
         if self.wish.is_some_and(|w| w.until <= at) {
@@ -460,6 +473,14 @@ impl Pet {
         }
     }
 
+    fn fall_asleep(&mut self, night: bool, out: &mut Vec<Happening>) {
+        self.asleep = true;
+        self.napping = !night;
+        self.groggy_since = None;
+        self.wish = None;
+        out.push(Happening::FellAsleep);
+    }
+
     /// The kind of care Hammi got most decides its adult form. Ties go to snuggly.
     fn adult_form(&self) -> Form {
         let c = &self.care;
@@ -482,6 +503,9 @@ impl Pet {
     /// Apply a player action. `poop_delay_minutes` is only used by meals.
     pub fn act(&mut self, action: Action, poop_delay_minutes: i64, now: DateTime<Utc>) -> Outcome {
         let mut outcome = self.act_inner(action, poop_delay_minutes, now);
+        if self.groggy_since.is_some() {
+            self.groggy_since = Some(now);
+        }
         let ate = matches!(action.kind, ActionKind::Meal | ActionKind::Snack) && outcome.log.is_some();
         if ate && action.food.is_some() && self.favourite_food == action.food {
             self.fun = (self.fun + FAVOURITE_BONUS_FUN).min(100.0);
@@ -563,7 +587,11 @@ impl Pet {
             }
             ActionKind::Pet => {
                 if self.asleep {
-                    return Outcome::quiet("love");
+                    // A tap wakes Hammi, sleepy but happy to see you.
+                    self.asleep = false;
+                    self.napping = false;
+                    self.groggy_since = Some(now);
+                    return Outcome::logged("yawn", format!("woke {name} up"));
                 }
                 let cuddles = match self.cuddle_window {
                     Some((start, n)) if now - start < PET_CARE_COOLDOWN => n + 1,
@@ -746,6 +774,56 @@ mod tests {
         p.t(noon() + Duration::hours(20)); // 08:00
         assert!(!p.asleep);
         assert!(!p.lights_off, "lights come back on at wake-up");
+    }
+
+    #[test]
+    fn a_tap_wakes_hammi_at_night_until_it_dozes_off_again() {
+        let night = noon() + Duration::hours(11); // 23:00
+        let mut p = hatched(noon());
+        p.t(night);
+        assert!(p.asleep);
+
+        let o = p.a(ActionKind::Pet, 0, 0, night);
+        assert_eq!((o.reaction, o.log.as_deref()), ("yawn", Some("woke Hammi up")));
+        assert!(!p.asleep && p.groggy_since.is_some());
+        p.fullness = 50.0;
+        assert_eq!(p.a(ActionKind::Meal, 0, 90, night + Duration::minutes(8)).reaction, "yum");
+
+        // Lights on: ten quiet minutes since the meal.
+        p.t(night + Duration::minutes(17));
+        assert!(!p.asleep, "the meal kept Hammi up");
+        assert_eq!(p.t(night + Duration::minutes(18)), vec![Happening::FellAsleep]);
+        assert!(p.asleep && p.groggy_since.is_none());
+
+        // Lights off: five quiet minutes.
+        let woke = night + Duration::minutes(30);
+        p.a(ActionKind::Pet, 0, 0, woke);
+        p.a(ActionKind::Lights, 0, 0, woke);
+        p.t(woke + Duration::minutes(4));
+        assert!(!p.asleep);
+        p.t(woke + Duration::minutes(5));
+        assert!(p.asleep);
+    }
+
+    #[test]
+    fn a_woken_hammi_stays_up_once_morning_comes() {
+        let mut p = hatched(noon());
+        let early = noon() + Duration::hours(19) + Duration::minutes(25); // 07:25
+        p.t(early);
+        p.a(ActionKind::Pet, 0, 0, early);
+        p.t(early + Duration::minutes(30));
+        assert!(!p.asleep && p.groggy_since.is_none());
+    }
+
+    #[test]
+    fn saves_from_before_waking_still_load() {
+        let mut p = hatched(noon());
+        p.asleep = true;
+        let mut json = serde_json::to_value(&p).unwrap();
+        json.as_object_mut().unwrap().remove("groggy_since");
+        let loaded: Pet = serde_json::from_value(json).unwrap();
+        assert!(loaded.asleep && loaded.groggy_since.is_none());
+        assert_eq!(loaded.care.meals, p.care.meals);
     }
 
     #[test]
