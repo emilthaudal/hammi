@@ -26,6 +26,10 @@ export function HowToPlay() {
           <strong>C</strong> goes back or cancels.
         </p>
         <p>Tap the screen itself to give Hammi a cuddle.</p>
+        <p>
+          If Hammi is asleep, a tap wakes it up for a sleepy snack or a game. Leave it be and it dozes off again: after
+          10 minutes, or 5 with the lights off.
+        </p>
       </details>
 
       <details>

@@ -14,7 +14,8 @@ export type Expr =
   | "eatOpen"
   | "nope"
   | "love"
-  | "sleep";
+  | "sleep"
+  | "yawn";
 
 export const GROUND = 31; // sprites stand with their last row on y = 30
 export const HOP = [0, -1, -2, -3, -3, -2, -1, 0];
@@ -57,6 +58,7 @@ export function composeHammi(body: S.Body, frame: number, expr: Expr, look = 0):
       case "blink":
       case "sleep":
       case "nope":
+      case "yawn":
         row(bottom);
         put(b, outer, bottom, 2);
         break;
@@ -96,6 +98,7 @@ export function composeHammi(body: S.Body, frame: number, expr: Expr, look = 0):
       mouth([[-1, 1], [0, 0], [1, 1]]);
       break;
     case "eatOpen":
+    case "yawn":
       mouth([[-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]);
       break;
     case "sleep":

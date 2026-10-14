@@ -80,6 +80,8 @@ pub struct PetView {
     energy: u8,
     poops: u8,
     asleep: bool,
+    /// Woken up past its sleep: awake but yawny.
+    groggy: bool,
     lights_off: bool,
     mood: Mood,
     server_time: DateTime<Utc>,
@@ -114,6 +116,7 @@ fn view(w: &World, now: DateTime<Utc>, config: &Config, who: &str) -> ApiResult<
         energy: p.energy.round() as u8,
         poops: p.poops,
         asleep: p.asleep,
+        groggy: p.groggy_since.is_some(),
         lights_off: p.lights_off,
         mood: p.mood(),
         server_time: now,

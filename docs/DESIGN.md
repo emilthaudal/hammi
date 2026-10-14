@@ -30,6 +30,8 @@ Deployed as one Railway service from the root `Dockerfile`, with a volume mounte
 
 **Sleep.** Hammi falls asleep at 21:30 local time (`HAMMI_TZ`, default `Europe/Copenhagen`) and wakes at 07:30. During the day it takes a nap if energy drops below 10 and wakes when energy reaches 100. Lights switch back on automatically when Hammi wakes.
 
+**Waking Hammi.** A `pet` while Hammi sleeps wakes it up (`groggy` in PetView): yawny but happy to eat, play and cuddle. Each action resets a quiet timer; after 10 minutes with nobody doing anything (5 with the lights off) it falls asleep again. Once it's daytime and energy is at least 10 (morning came, or it was woken from a nap), it just stays awake. The lights stay as they are.
+
 ## Life stages
 
 | Stage | When | |
@@ -58,7 +60,7 @@ All actions are `POST /api/action` with `{ "type": ..., ... }`. Each returns the
 | `snack` | fullness +8, fun +12 | `yum` | no → `asleep` |
 | `play` | body `{ "won": 0..5 }`. fun +10 + 6·won, energy −8 | `happy` | no → `asleep` |
 | `clean` | poops = 0 | `clean`, or `nothing` if already clean | yes |
-| `pet` | fun +5 (care counter at most once per 10 min) | `love` | yes → `love` (Hammi smiles in its sleep) |
+| `pet` | fun +5 (care counter at most once per 10 min) | `love` | yes → `yawn`, wakes Hammi up (see Sleep) |
 | `lights` | toggles lightsOff | `lights_off` / `lights_on` | yes |
 
 Actions on an `egg` return reaction `egg` and change nothing, except `pet` (`love`).
@@ -154,6 +156,7 @@ type PetView = {
   energy: number;
   poops: number;              // 0–4
   asleep: boolean;
+  groggy: boolean;            // woken up past its sleep, dozes off again if left alone
   lightsOff: boolean;
   mood: "happy" | "okay" | "sad";
   serverTime: string;         // ISO 8601

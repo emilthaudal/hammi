@@ -15,6 +15,8 @@ export type PetView = {
   energy: number;
   poops: number;
   asleep: boolean;
+  /** Woken up past its sleep: awake but yawny, and dozes off again if left alone. */
+  groggy: boolean;
   lightsOff: boolean;
   mood: Mood;
   serverTime: string;
@@ -65,4 +67,5 @@ export type Reaction =
   | "lights_on"
   | "lights_off"
   | "asleep"
+  | "yawn"
   | "egg";
