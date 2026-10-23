@@ -15,8 +15,8 @@ HAMMI_PASSCODE=hammi HAMMI_SPEED=60 cargo run
 
 # terminal 2: the web app with hot reload, proxying /api to :8080
 cd web
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Log in with passcode `hammi` and any name.
